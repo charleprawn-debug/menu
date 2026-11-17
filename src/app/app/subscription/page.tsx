@@ -6,7 +6,6 @@ import {
   BadgeCheck,
   CalendarClock,
   Check,
-  CircleDollarSign,
   CreditCard,
   FileText,
   HardDrive,
@@ -29,7 +28,6 @@ import {
   cancelScheduledPlanChangeAction,
   cancelSubscriptionAtPeriodEndAction,
   changeSubscriptionPlanAction,
-  createRenewalInvoiceAction,
   resumeSubscriptionAction,
 } from "@/app/actions/subscription";
 
@@ -45,17 +43,15 @@ const planLimit = (value: number | null, locale: Locale, enUnit: string, arUnit:
 
 const notices: Record<string, [string, string]> = {
   "invalid-selection": ["Choose an active plan and a valid billing cycle.", "اختر باقة فعّالة ودورة فوترة صحيحة."],
-  "cancellation-scheduled": ["Your cancellation request is recorded for period end. Automatic subscription lifecycle processing is not enabled yet.", "تم تسجيل طلب الإلغاء لنهاية الفترة. المعالجة التلقائية لدورة الاشتراك غير مفعّلة حالياً."],
+  "cancellation-scheduled": ["Your cancellation request is recorded for period end. Local subscriptions are processed by the protected lifecycle job; provider-linked subscriptions follow verified provider events.", "تم تسجيل طلب الإلغاء لنهاية الفترة. تُعالج الاشتراكات المحلية عبر مهمة دورة الحياة المحمية، وتتبع الاشتراكات المرتبطة بمزود أحداثاً موثقة منه."],
   "trial-plan-updated": ["Your trial plan and billing cycle were updated. No charge was made.", "تم تحديث باقة التجربة ودورة الفوترة. لم يتم تحصيل أي مبلغ."],
   "subscription-not-active": ["This subscription cannot be changed right now.", "لا يمكن تغيير هذا الاشتراك حالياً."],
   "same-plan": ["That plan and billing cycle are already selected.", "هذه الباقة ودورة الفوترة محددتان بالفعل."],
   "change-already-scheduled": ["A plan change is already scheduled. Cancel it before choosing another.", "يوجد تغيير باقة مجدول بالفعل. ألغِه قبل اختيار تغيير آخر."],
-  "plan-change-scheduled": ["Your plan-change request is recorded for the end of the paid period. Automatic payment and entitlement changes are not active yet.", "تم تسجيل طلب تغيير الباقة لنهاية الفترة المدفوعة. الدفع التلقائي وتغيير الاستحقاقات غير مفعّلين حالياً."],
+  "plan-change-scheduled": ["Your plan-change request is recorded for the current period end. Local requests are not activated without verified provider confirmation.", "تم تسجيل طلب تغيير الباقة لنهاية الفترة الحالية. لا تُفعّل الطلبات المحلية دون تأكيد موثوق من مزود الدفع."],
   "plan-change-cancelled": ["The scheduled plan change was cancelled.", "تم إلغاء تغيير الباقة المجدول."],
   "renewal-resumed": ["The cancellation request was cleared. Current access and billing status are unchanged.", "تم إلغاء طلب الإلغاء. لم تتغير صلاحية الوصول أو حالة الفوترة الحالية."],
-  "renewal-unavailable": ["A renewal invoice is not available for this subscription.", "فاتورة التجديد غير متاحة لهذا الاشتراك."],
-  "renewal-with-change-scheduled": ["A renewal invoice cannot be prepared while a plan change is scheduled.", "لا يمكن إعداد فاتورة تجديد مع وجود تغيير باقة مجدول."],
-  "invoice-issued-pending-payment": ["An invoice was issued. Payment collection is unavailable until an owner-approved gateway is configured.", "تم إصدار فاتورة. تحصيل المدفوعات غير متاح حتى إعداد بوابة يوافق عليها المالك."],
+  "billing-unavailable": ["Billing actions are unavailable until an approved provider adapter is enabled.", "إجراءات الفوترة غير متاحة حتى تفعيل تكامل مزود دفع معتمد."],
 };
 
 function statusText(status: string, locale: Locale) {
@@ -90,7 +86,7 @@ export default async function SubscriptionPage({ searchParams }: { searchParams:
       include: {
         plan: { include: { features: { where: { enabled: true, feature: { isActive: true } }, include: { feature: true } } } },
         planChanges: {
-          where: { status: "SCHEDULED" },
+          where: { status: { in: ["SCHEDULED", "AWAITING_PROVIDER", "PENDING_PROVIDER"] } },
           include: { fromPlan: true, toPlan: true },
           orderBy: { effectiveAt: "asc" },
           take: 1,
@@ -140,7 +136,7 @@ export default async function SubscriptionPage({ searchParams }: { searchParams:
         </div>
         <div className="inline-flex w-fit items-center gap-2 rounded-xl border bg-card px-3 py-2 text-xs text-muted-foreground">
           <CreditCard className="size-4 text-primary" />
-          {tr(locale, "Payment collection requires an owner-approved gateway.", "يتطلب تحصيل المدفوعات بوابة يوافق عليها المالك.")}
+          {tr(locale, "Checkout and portal are unavailable until an approved provider adapter is enabled.", "الدفع وبوابة العميل غير متاحين حتى تفعيل تكامل مزود دفع معتمد.")}
         </div>
       </header>
 
@@ -184,7 +180,7 @@ export default async function SubscriptionPage({ searchParams }: { searchParams:
                 <div><p className="text-xs text-muted-foreground">{tr(locale, "Trial ends", "نهاية الفترة التجريبية")}</p><p className="mt-1 font-medium">{subscription.trialEndsAt ? dateFormat(subscription.trialEndsAt, locale) : "—"}</p></div>
               </div>
               <div className="relative mt-4 rounded-xl border border-amber-300/50 bg-amber-50/70 p-3 text-xs leading-5 text-amber-950 dark:bg-amber-950/20 dark:text-amber-100">
-                <div className="flex gap-2"><AlertCircle className="mt-0.5 size-4 shrink-0" /><p>{tr(locale, "Payment collection and automatic renewal are unavailable until an owner-approved payment gateway is configured. Invoices are records only; no payment is taken here.", "تحصيل المدفوعات والتجديد التلقائي غير متاحين حتى إعداد بوابة دفع يوافق عليها المالك. الفواتير سجلات فقط؛ لا يتم تحصيل أي دفعة هنا.")}</p></div>
+                <div className="flex gap-2"><AlertCircle className="mt-0.5 size-4 shrink-0" /><p>{tr(locale, "Checkout, customer portal and automatic renewal are unavailable until a provider adapter is registered and enabled. Invoices are records only; no payment is taken here.", "الدفع وبوابة العميل والتجديد التلقائي غير متاحة حتى تسجيل تكامل مزود وتفعيله. الفواتير سجلات فقط؛ لا يتم تحصيل أي دفعة هنا.")}</p></div>
               </div>
             </div>
 
@@ -192,8 +188,8 @@ export default async function SubscriptionPage({ searchParams }: { searchParams:
               <div className="flex items-center gap-2"><CalendarClock className="size-4 text-primary" /><h2 className="font-semibold">{tr(locale, "Renewal controls", "إعدادات التجديد")}</h2></div>
               <p className="mt-2 text-sm leading-6 text-muted-foreground">
                 {subscription.cancelAtPeriodEnd
-                  ? tr(locale, "A cancellation request is recorded for the current period end. Automatic lifecycle processing is not enabled yet, so current access remains unchanged.", "تم تسجيل طلب الإلغاء لنهاية الفترة الحالية. المعالجة التلقائية غير مفعّلة حالياً، لذا تبقى صلاحية الوصول كما هي.")
-                  : tr(locale, "You can record a cancellation request for period end. It does not issue a refund or collect a payment, and automatic lifecycle processing is not enabled yet.", "يمكنك تسجيل طلب الإلغاء لنهاية الفترة. لا ينتج عنه استرداد أو تحصيل، والمعالجة التلقائية لدورة الاشتراك غير مفعّلة حالياً.")}
+                  ? tr(locale, "Cancellation is recorded for period end. Local subscriptions are finalized by the protected lifecycle job; provider-linked subscriptions follow verified provider events.", "تم تسجيل الإلغاء لنهاية الفترة. تُنهى الاشتراكات المحلية عبر مهمة دورة الحياة المحمية، وتتبع الاشتراكات المرتبطة بمزود أحداثاً موثقة منه.")
+                  : tr(locale, "You can record a cancellation request for period end. It does not issue a refund or collect a payment; local lifecycle processing is timestamp-based.", "يمكنك تسجيل طلب إلغاء لنهاية الفترة. لا ينتج عنه استرداد أو تحصيل؛ وتعتمد معالجة الاشتراك المحلي على التواريخ.")}
               </p>
               {canManage && <div className="mt-4 flex flex-wrap gap-2">
                 {subscription.cancelAtPeriodEnd ? (
@@ -201,9 +197,8 @@ export default async function SubscriptionPage({ searchParams }: { searchParams:
                 ) : subscription.status === "ACTIVE" || subscription.status === "TRIALING" ? (
                   <form action={cancelSubscriptionAtPeriodEndAction}><Button type="submit" variant="outline" size="sm">{tr(locale, "Cancel at period end", "الإلغاء في نهاية الفترة")}</Button></form>
                 ) : null}
-                {subscription.status === "ACTIVE" && !subscription.cancelAtPeriodEnd && !scheduledChange && <form action={createRenewalInvoiceAction}><Button type="submit" size="sm"><CircleDollarSign />{tr(locale, "Prepare renewal invoice", "إعداد فاتورة التجديد")}</Button></form>}
               </div>}
-              {canManage && subscription.status !== "ACTIVE" && <p className="mt-3 text-xs text-muted-foreground">{tr(locale, "Renewal invoice preparation is available for active subscriptions only.", "إعداد فاتورة التجديد متاح للاشتراكات النشطة فقط.")}</p>}
+              {canManage && <p className="mt-3 text-xs text-muted-foreground">{tr(locale, "No renewal invoice or charge is created automatically.", "لا تُنشأ فاتورة تجديد أو عملية تحصيل تلقائياً.")}</p>}
             </div>
           </section>
 
@@ -228,14 +223,19 @@ export default async function SubscriptionPage({ searchParams }: { searchParams:
 
           {scheduledChange && <section className="flex flex-col gap-3 rounded-2xl border border-primary/20 bg-primary/5 p-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex gap-3"><ArrowRightLeft className="mt-0.5 size-5 shrink-0 text-primary" /><div>
-              <h2 className="text-sm font-semibold">{tr(locale, "Plan change scheduled", "تغيير الباقة مجدول")}</h2>
-              <p className="mt-1 text-xs leading-5 text-muted-foreground">{tr(locale, `Request to change from ${scheduledChange.fromPlan.nameEn || scheduledChange.fromPlan.name} to ${scheduledChange.toPlan.nameEn || scheduledChange.toPlan.name} recorded for ${dateFormat(scheduledChange.effectiveAt, locale)}. Payment and automatic plan activation are not enabled yet.`, `تم تسجيل طلب التغيير من ${scheduledChange.fromPlan.name} إلى ${scheduledChange.toPlan.name} بتاريخ ${dateFormat(scheduledChange.effectiveAt, locale)}. الدفع وتفعيل الباقة تلقائياً غير مفعّلين حالياً.`)}</p>
+              <h2 className="text-sm font-semibold">{scheduledChange.status === "PENDING_PROVIDER" ? tr(locale, "Provider synchronization pending", "مزامنة مزود الدفع معلّقة") : tr(locale, "Plan change scheduled", "تغيير الباقة مجدول")}</h2>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">{tr(locale, `Request to change from ${scheduledChange.fromPlan.nameEn || scheduledChange.fromPlan.name} to ${scheduledChange.toPlan.nameEn || scheduledChange.toPlan.name} recorded for ${dateFormat(scheduledChange.effectiveAt, locale)}. ${scheduledChange.status === "PENDING_PROVIDER" ? "The request is saved safely; the current plan remains active. Retry synchronization or cancel the request." : scheduledChange.status === "AWAITING_PROVIDER" ? "It remains pending verified provider confirmation; the current plan is unchanged." : "No local paid-plan activation occurs automatically."}`, `تم تسجيل طلب التغيير من ${scheduledChange.fromPlan.name} إلى ${scheduledChange.toPlan.name} بتاريخ ${dateFormat(scheduledChange.effectiveAt, locale)}. ${scheduledChange.status === "PENDING_PROVIDER" ? "حُفظ الطلب بأمان؛ وتبقى الباقة الحالية فعالة. أعد محاولة المزامنة أو ألغِ الطلب." : scheduledChange.status === "AWAITING_PROVIDER" ? "ما زال بانتظار تأكيد موثوق من مزود الدفع؛ ولم تتغير الباقة الحالية." : "لا يتم تفعيل باقة مدفوعة محلياً تلقائياً."}`)}</p>
             </div></div>
+            {canManage && scheduledChange.status === "PENDING_PROVIDER" && <form action={changeSubscriptionPlanAction}>
+              <input type="hidden" name="planId" value={scheduledChange.toPlanId} />
+              <input type="hidden" name="billingCycle" value={scheduledChange.billingCycle} />
+              <Button type="submit" variant="outline" size="sm">{tr(locale, "Retry provider sync", "إعادة محاولة المزامنة")}</Button>
+            </form>}
             {canManage && <form action={cancelScheduledPlanChangeAction}><Button type="submit" variant="outline" size="sm">{tr(locale, "Cancel scheduled change", "إلغاء التغيير المجدول")}</Button></form>}
           </section>}
 
           {canManage && !scheduledChange && (subscription.status === "TRIALING" || subscription.status === "ACTIVE") && !subscription.cancelAtPeriodEnd && <section className="rounded-2xl border bg-card p-5 shadow-soft sm:p-6">
-            <div className="mb-4 flex items-start gap-3"><div className="flex size-9 items-center justify-center rounded-xl bg-primary/10 text-primary"><ArrowRightLeft className="size-4" /></div><div><h2 className="font-semibold">{tr(locale, "Change plan", "تغيير الباقة")}</h2><p className="mt-1 text-xs leading-5 text-muted-foreground">{subscription.status === "TRIALING" ? tr(locale, "During the trial, the selected plan and billing cycle take effect immediately with no charge.", "أثناء التجربة، تسري الباقة ودورة الفوترة المحددتان فوراً دون تحصيل مبلغ.") : tr(locale, "For an active subscription, your request is recorded for the end of the current period. No proration or early charge is made; automated billing and plan activation are not enabled.", "للاشتراك النشط، يُسجّل الطلب لنهاية الفترة الحالية. لا يوجد احتساب نسبي أو تحصيل مبكر؛ الفوترة وتفعيل الباقة تلقائياً غير مفعّلين.")}</p></div></div>
+            <div className="mb-4 flex items-start gap-3"><div className="flex size-9 items-center justify-center rounded-xl bg-primary/10 text-primary"><ArrowRightLeft className="size-4" /></div><div><h2 className="font-semibold">{tr(locale, "Change plan", "تغيير الباقة")}</h2><p className="mt-1 text-xs leading-5 text-muted-foreground">{subscription.status === "TRIALING" ? tr(locale, "During a local trial, the selected plan and billing cycle take effect immediately with no charge.", "أثناء التجربة المحلية، تسري الباقة ودورة الفوترة المحددتان فوراً دون تحصيل مبلغ.") : tr(locale, "For an active subscription, the request is recorded for the end of the current period. No proration, early charge or automatic local paid-plan activation occurs.", "للاشتراك النشط، يُسجّل الطلب لنهاية الفترة الحالية. لا يوجد احتساب نسبي أو تحصيل مبكر أو تفعيل تلقائي محلي لباقة مدفوعة.")}</p></div></div>
             <form action={changeSubscriptionPlanAction} className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_220px_auto] sm:items-end">
               <label className="grid gap-1.5 text-xs font-medium">{tr(locale, "Available plan", "الباقة المتاحة")}
                 <select name="planId" required defaultValue={subscription.planId} className="h-10 rounded-xl border border-input bg-background px-3 text-sm">
@@ -277,7 +277,7 @@ export default async function SubscriptionPage({ searchParams }: { searchParams:
         <div className="flex flex-wrap items-center justify-between gap-3 border-b p-5"><div className="flex items-center gap-2"><FileText className="size-4 text-primary" /><div><h2 className="font-semibold">{tr(locale, "Invoices", "الفواتير")}</h2><p className="mt-1 text-xs text-muted-foreground">{tr(locale, "Issued subscription invoices and their billing periods.", "فواتير الاشتراك الصادرة وفترات الفوترة الخاصة بها.")}</p></div></div><span className="text-xs text-muted-foreground">{tr(locale, "Most recent", "الأحدث")}: {formatNumber(invoices.length, locale)}</span></div>
         {invoices.length === 0 ? <div className="p-8 text-center"><ReceiptText className="mx-auto size-7 text-muted-foreground/60" /><p className="mt-2 text-sm text-muted-foreground">{tr(locale, "No invoices yet.", "لا توجد فواتير بعد.")}</p></div> : <div className="divide-y">
           {invoices.map((invoice) => <div key={invoice.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-            <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="font-mono text-xs font-semibold" dir="ltr">{invoice.number}</span><Badge variant={invoice.status === "PAID" ? "success" : invoice.status === "ISSUED" ? "warning" : "secondary"}>{statusText(invoice.status, locale)}</Badge></div><p className="mt-1 text-xs text-muted-foreground">{tr(locale, "Issued", "تاريخ الإصدار")} {dateFormat(invoice.createdAt, locale)} · {dateFormat(invoice.periodStart, locale)} – {dateFormat(invoice.periodEnd, locale)}</p></div>
+            <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="font-mono text-xs font-semibold" dir="ltr">{invoice.providerInvoiceNumber || invoice.number}</span><Badge variant={invoice.status === "PAID" ? "success" : invoice.status === "ISSUED" ? "warning" : "secondary"}>{statusText(invoice.status, locale)}</Badge></div><p className="mt-1 text-xs text-muted-foreground">{tr(locale, "Issued", "تاريخ الإصدار")} {dateFormat(invoice.createdAt, locale)} · {dateFormat(invoice.periodStart, locale)} – {dateFormat(invoice.periodEnd, locale)}</p></div>
             <div className="flex items-center justify-between gap-3 sm:justify-end"><span className="text-sm font-bold tabular-nums" dir="ltr">{formatMoney(invoice.amount, invoice.currency, locale)}</span><Button asChild size="sm" variant="outline"><Link href={`/app/subscription/invoices/${invoice.id}`}><Printer />{tr(locale, "View / print", "عرض / طباعة")}</Link></Button></div>
           </div>)}
         </div>}

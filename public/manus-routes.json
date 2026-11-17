@@ -26,6 +26,8 @@
     { "path": "/en/forgot-password", "title": "English password recovery" },
     { "path": "/ar/reset-password", "title": "Arabic password reset" },
     { "path": "/en/reset-password", "title": "English password reset" },
+    { "path": "/ar/verify-email", "title": "Arabic email verification" },
+    { "path": "/en/verify-email", "title": "English email verification" },
     { "path": "/ar/onboarding", "title": "Arabic restaurant onboarding" },
     { "path": "/en/onboarding", "title": "English restaurant onboarding" },
     { "path": "/ar/app/:section", "title": "Arabic restaurant dashboard" },

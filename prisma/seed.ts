@@ -383,29 +383,16 @@ async function main() {
   for (let index = 0; index < 3; index += 1) {
     const periodStart = new Date(Date.now() - (index + 1) * 30 * 86400000);
     const periodEnd = new Date(Date.now() - index * 30 * 86400000);
-    const invoice = await db.subscriptionInvoice.create({
+    await db.subscriptionInvoice.create({
       data: {
         subscriptionId: subscription.id,
         number: `SUB-${new Date().getFullYear()}-${String(1000 + index)}`,
         amount: 2490,
         currency: "SAR",
-        status: "PAID",
+        status: "ISSUED",
         periodStart,
         periodEnd,
         dueAt: periodStart,
-        paidAt: periodStart,
-      },
-    });
-    await db.subscriptionPayment.create({
-      data: {
-        subscriptionId: subscription.id,
-        invoiceId: invoice.id,
-        amount: 2490,
-        currency: "SAR",
-        method: "CARD",
-        status: "SUCCEEDED",
-        reference: `PAY-${1000 + index}`,
-        paidAt: periodStart,
       },
     });
   }

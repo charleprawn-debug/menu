@@ -9,8 +9,21 @@ export const SESSION_COOKIE = "df_session";
 export const RESTAURANT_COOKIE = "df_restaurant";
 export const LOCALE_COOKIE = "df_locale";
 const SESSION_DAYS = 30;
+export function isEmailVerificationRequired(): boolean {
+  return process.env.EMAIL_VERIFICATION_REQUIRED?.trim().toLowerCase() === "true";
+}
+
+function configuredAppUsesHttps(): boolean {
+  try {
+    const appUrl = new URL(process.env.NEXT_PUBLIC_APP_URL || "");
+    return appUrl.protocol === "https:" && !appUrl.username && !appUrl.password;
+  } catch {
+    return false;
+  }
+}
+
 const secureCookies = process.env.SESSION_COOKIE_SECURE === "true"
-  || process.env.NEXT_PUBLIC_APP_URL?.startsWith("https://") === true;
+  || configuredAppUsesHttps();
 const cookieSameSite: "lax" | "none" = secureCookies ? "none" : "lax";
 
 export function hashToken(token: string): string {
@@ -23,6 +36,10 @@ export interface AuthContext {
 }
 
 export async function createSession(userId: string): Promise<string> {
+  if (isEmailVerificationRequired()) {
+    const user = await db.user.findUnique({ where: { id: userId }, select: { emailVerifiedAt: true } });
+    if (!user?.emailVerifiedAt) throw new Error("Email verification required before creating a session");
+  }
   const token = randomBytes(32).toString("base64url");
   const headerStore = await headers();
   const expiresAt = new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000);
@@ -79,6 +96,7 @@ export const getAuth = cache(async (): Promise<AuthContext | null> => {
     return null;
   }
   if (session.user.status !== "ACTIVE" || session.user.deletedAt) return null;
+  if (isEmailVerificationRequired() && !session.user.emailVerifiedAt) return null;
 
   return { user: session.user, sessionId: session.id };
 });

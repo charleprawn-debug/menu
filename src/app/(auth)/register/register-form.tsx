@@ -60,6 +60,12 @@ export function RegisterForm({
         </div>
       ) : null}
 
+      {state.message ? (
+        <div role="status" className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-3 py-2.5 text-sm text-emerald-800 dark:text-emerald-300">
+          {state.message}
+        </div>
+      ) : null}
+
       <input type="hidden" name="planKey" value={planKey} />
       <input type="hidden" name="billingCycle" value={billingCycle} />
 

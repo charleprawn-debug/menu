@@ -32,6 +32,12 @@ export function LoginForm({ next, reset }: { next?: string; reset?: boolean }) {
         </div>
       ) : null}
 
+      {state.unverified ? (
+        <Link href="/verify-email" className="-mt-3 block text-sm font-semibold text-primary hover:underline">
+          {t("auth.verify.loginLink")}
+        </Link>
+      ) : null}
+
       <div className="space-y-1.5">
         <Label htmlFor="email">{t("common.email")}</Label>
         <Input

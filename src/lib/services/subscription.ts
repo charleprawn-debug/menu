@@ -3,18 +3,48 @@ import { db } from "@/lib/db";
 
 export type SubscriptionLimitKey = "staff" | "branches" | "products" | "tables" | "ordersPerMonth" | "storageMb";
 
-const ACTIVE_ACCESS_STATUSES = ["TRIALING", "ACTIVE"] as const;
-
 /** Resolve access from the current database subscription; callers cannot supply entitlements. */
 export async function assertSubscriptionAccess(restaurantId: string) {
   const subscription = await db.subscription.findFirst({
     where: { restaurantId, restaurant: { deletedAt: null } },
     include: { plan: true },
   });
-  if (!subscription || !ACTIVE_ACCESS_STATUSES.includes(subscription.status as (typeof ACTIVE_ACCESS_STATUSES)[number])) {
+  if (!subscription) throw new Error("SUBSCRIPTION_ACCESS_REQUIRED");
+
+  const now = new Date();
+  const isLocal = subscription.providerSubscriptionId === null;
+  if (subscription.status === "TRIALING") {
+    const trialEnd = subscription.trialEndsAt ?? subscription.currentPeriodEnd;
+    if (trialEnd > now) return subscription;
+    if (isLocal) {
+      await db.subscription.updateMany({
+        where: { id: subscription.id, status: "TRIALING", providerSubscriptionId: null },
+        data: { status: subscription.cancelAtPeriodEnd ? "CANCELLED" : "EXPIRED" },
+      });
+    }
     throw new Error("SUBSCRIPTION_ACCESS_REQUIRED");
   }
-  return subscription;
+
+  if (subscription.status === "ACTIVE") {
+    if (subscription.currentPeriodEnd > now) return subscription;
+    if (!subscription.cancelAtPeriodEnd && subscription.graceEndsAt && subscription.graceEndsAt > now) {
+      if (isLocal) await db.subscription.updateMany({ where: { id: subscription.id, status: "ACTIVE" }, data: { status: "PAST_DUE" } });
+      return subscription;
+    }
+    if (isLocal) {
+      await db.subscription.updateMany({
+        where: { id: subscription.id, status: "ACTIVE", providerSubscriptionId: null },
+        data: { status: subscription.cancelAtPeriodEnd ? "CANCELLED" : "PAUSED" },
+      });
+    }
+    throw new Error("SUBSCRIPTION_ACCESS_REQUIRED");
+  }
+
+  if (subscription.status === "PAST_DUE" && subscription.graceEndsAt && subscription.graceEndsAt > now) return subscription;
+  if (subscription.status === "PAST_DUE" && isLocal) {
+    await db.subscription.updateMany({ where: { id: subscription.id, status: "PAST_DUE" }, data: { status: "PAUSED" } });
+  }
+  throw new Error("SUBSCRIPTION_ACCESS_REQUIRED");
 }
 
 /** Throws unless the current subscription plan includes the requested active feature. */
