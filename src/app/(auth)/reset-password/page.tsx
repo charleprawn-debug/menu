@@ -4,7 +4,10 @@ import { getI18n } from "@/i18n";
 import { ResetForm } from "./reset-form";
 import { Button } from "@/components/ui/button";
 
-export const metadata: Metadata = { title: "تعيين كلمة مرور جديدة" };
+export async function generateMetadata(): Promise<Metadata> {
+  const { locale } = await getI18n();
+  return { title: locale === "ar" ? "تعيين كلمة مرور جديدة" : "Set a new password" };
+}
 
 export default async function ResetPasswordPage({ searchParams }: { searchParams: Promise<{ token?: string }> }) {
   const params = await searchParams;

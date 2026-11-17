@@ -6,6 +6,8 @@ import { db } from "@/lib/db";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { createSession, destroySession, setRestaurantCookie } from "@/lib/auth/session";
 import { forgotPasswordSchema, loginSchema, registerSchema, resetPasswordSchema } from "@/lib/validations/auth";
+import { getLocale } from "@/i18n";
+import { sendPasswordResetEmail } from "@/lib/email/password-reset";
 
 export interface ActionState {
   ok?: boolean;
@@ -20,6 +22,16 @@ function fieldErrorsFrom(error: { flatten: () => { fieldErrors: Record<string, s
   return Object.fromEntries(Object.entries(flat).map(([key, value]) => [key, value?.[0] ?? ""]));
 }
 
+const seededDemoAccountEmails = new Set([
+  "admin@dineflow.app",
+  "owner@dineflow.app",
+  "manager@dineflow.app",
+  "waiter@dineflow.app",
+  "cashier@dineflow.app",
+  "chef@dineflow.app",
+  "accountant@dineflow.app",
+]);
+
 export async function loginAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const parsed = loginSchema.safeParse({
     email: formData.get("email"),
@@ -31,15 +43,21 @@ export async function loginAction(_prev: ActionState, formData: FormData): Promi
     return { error: "تحقق من البيانات المدخلة", fieldErrors: fieldErrorsFrom(parsed.error) };
   }
 
+  const locale = await getLocale();
+  const invalidCredentials = locale === "ar" ? "البريد الإلكتروني أو كلمة المرور غير صحيحة" : "Incorrect email or password";
+  if (process.env.NODE_ENV === "production" && seededDemoAccountEmails.has(parsed.data.email.toLowerCase())) {
+    return { error: invalidCredentials };
+  }
+
   const user = await db.user.findUnique({ where: { email: parsed.data.email } });
   if (!user || !(await verifyPassword(parsed.data.password, user.passwordHash))) {
-    return { error: "البريد الإلكتروني أو كلمة المرور غير صحيحة" };
+    return { error: invalidCredentials };
   }
   if (user.status === "SUSPENDED") {
-    return { error: "هذا الحساب موقوف. تواصل مع الدعم." };
+    return { error: locale === "ar" ? "هذا الحساب موقوف. تواصل مع الدعم." : "This account is suspended. Contact support." };
   }
   if (user.status === "DELETED") {
-    return { error: "البريد الإلكتروني أو كلمة المرور غير صحيحة" };
+    return { error: invalidCredentials };
   }
 
   await db.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
@@ -47,7 +65,7 @@ export async function loginAction(_prev: ActionState, formData: FormData): Promi
 
   const memberships = await db.restaurantMember.findMany({
     where: { userId: user.id, status: "ACTIVE", restaurant: { deletedAt: null } },
-    include: { restaurant: { select: { slug: true } } },
+    include: { restaurant: { select: { slug: true, status: true, onboardingCompletedAt: true } } },
     orderBy: { createdAt: "asc" },
     take: 1,
   });
@@ -56,6 +74,9 @@ export async function loginAction(_prev: ActionState, formData: FormData): Promi
   if (memberships.length === 0) redirect("/onboarding");
 
   await setRestaurantCookie(memberships[0].restaurant.slug);
+  if (memberships[0].restaurant.status === "DRAFT" || !memberships[0].restaurant.onboardingCompletedAt) {
+    redirect("/onboarding");
+  }
   redirect("/app/dashboard");
 }
 
@@ -67,31 +88,52 @@ export async function registerAction(_prev: ActionState, formData: FormData): Pr
     password: formData.get("password"),
     confirmPassword: formData.get("confirmPassword"),
     terms: formData.get("terms") || undefined,
+    planKey: formData.get("planKey") || undefined,
+    billingCycle: formData.get("billingCycle") || undefined,
   });
 
   if (!parsed.success) {
     return { error: "تحقق من البيانات المدخلة", fieldErrors: fieldErrorsFrom(parsed.error) };
   }
 
+  const locale = await getLocale();
+  const emailExists = locale === "ar" ? "هذا البريد مسجّل بالفعل" : "This email is already registered";
   const existing = await db.user.findUnique({ where: { email: parsed.data.email } });
   if (existing) {
-    return { error: "هذا البريد مسجّل بالفعل", fieldErrors: { email: "هذا البريد مسجّل بالفعل" } };
+    return { error: emailExists, fieldErrors: { email: emailExists } };
+  }
+
+  if (parsed.data.planKey) {
+    const selectedPlan = await db.plan.findUnique({ where: { key: parsed.data.planKey }, select: { isActive: true } });
+    if (!selectedPlan?.isActive) {
+      return { error: locale === "ar" ? "الباقة المختارة لم تعد متاحة. حدّث صفحة الأسعار واختر باقة أخرى." : "The selected plan is no longer available. Refresh pricing and choose another plan." };
+    }
   }
 
   const passwordHash = await hashPassword(parsed.data.password);
-  const user = await db.user.create({
-    data: {
-      name: parsed.data.name,
-      email: parsed.data.email,
-      phone: parsed.data.phone || null,
-      passwordHash,
-      status: "ACTIVE",
-      locale: "ar",
-    },
-  });
+  let user;
+  try {
+    user = await db.user.create({
+      data: {
+        name: parsed.data.name,
+        email: parsed.data.email,
+        phone: parsed.data.phone || null,
+        passwordHash,
+        status: "ACTIVE",
+        locale,
+      },
+    });
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "P2002") {
+      return { error: emailExists, fieldErrors: { email: emailExists } };
+    }
+    throw error;
+  }
 
   await createSession(user.id);
-  redirect("/onboarding");
+  const onboardingQuery = new URLSearchParams({ cycle: parsed.data.billingCycle });
+  if (parsed.data.planKey) onboardingQuery.set("plan", parsed.data.planKey);
+  redirect(`/onboarding?${onboardingQuery.toString()}`);
 }
 
 export async function logoutAction(): Promise<void> {
@@ -105,8 +147,11 @@ export async function forgotPasswordAction(_prev: ActionState, formData: FormDat
     return { error: "بريد إلكتروني غير صالح", fieldErrors: fieldErrorsFrom(parsed.error) };
   }
 
+  const locale = await getLocale();
+  const genericMessage = locale === "ar"
+    ? "إذا كان البريد مسجّلًا، فلن يُرسل رابط الاستعادة إلا عند تهيئة خدمة البريد وعملها."
+    : "If this email is registered, a reset link can be sent only when email delivery is configured and working.";
   const user = await db.user.findUnique({ where: { email: parsed.data.email } });
-  const genericMessage = "إذا كان البريد مسجلاً، فقد تم إرسال رابط الاستعادة.";
 
   if (!user || user.status === "DELETED") {
     return { ok: true, message: genericMessage };
@@ -120,15 +165,28 @@ export async function forgotPasswordAction(_prev: ActionState, formData: FormDat
     data: { userId: user.id, tokenHash, expiresAt: new Date(Date.now() + 60 * 60 * 1000) },
   });
 
-  const base = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-  const resetUrl = `${base}/reset-password?token=${token}`;
+  const delivery = await sendPasswordResetEmail(parsed.data.email, token, locale);
+  const showLink = delivery === "unavailable" && process.env.NODE_ENV !== "production";
+  if (delivery !== "sent" && !showLink) {
+    await db.passwordResetToken.delete({ where: { tokenHash } }).catch(() => null);
+  }
 
-  // Without SMTP configured we surface the link in non-production so the flow stays testable.
-  const showLink = process.env.NODE_ENV !== "production" && !process.env.SMTP_HOST;
-
-  console.info(`[auth] password reset link for ${user.email}: ${resetUrl}`);
-
-  return { ok: true, message: genericMessage, resetUrl: showLink ? resetUrl : undefined };
+  let resetUrl: string | undefined;
+  if (showLink) {
+    let baseUrl: URL;
+    try {
+      baseUrl = new URL(process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000");
+      if ((baseUrl.protocol !== "https:" && baseUrl.protocol !== "http:") || baseUrl.username || baseUrl.password) {
+        throw new Error("Invalid app URL");
+      }
+    } catch {
+      baseUrl = new URL("http://localhost:3000");
+    }
+    const url = new URL("/reset-password", baseUrl);
+    url.searchParams.set("token", token);
+    resetUrl = url.toString();
+  }
+  return { ok: true, message: genericMessage, resetUrl };
 }
 
 export async function resetPasswordAction(_prev: ActionState, formData: FormData): Promise<ActionState> {

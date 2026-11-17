@@ -92,14 +92,6 @@ export function LoginForm({ next, reset }: { next?: string; reset?: boolean }) {
           {t("auth.login.createAccount")}
         </Link>
       </p>
-
-      <div className="rounded-xl border border-dashed bg-muted/40 p-3 text-center text-xs text-muted-foreground">
-        <p className="font-medium text-foreground">حسابات تجريبية</p>
-        <p className="mt-1" dir="ltr">
-          owner@dineflow.app · Admin123!
-        </p>
-        <p dir="ltr">admin@dineflow.app · Admin123!</p>
-      </div>
     </form>
   );
 }

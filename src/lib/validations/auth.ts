@@ -14,6 +14,8 @@ export const registerSchema = z
     password: z.string().min(8, "كلمة المرور يجب أن تكون 8 أحرف على الأقل").max(200),
     confirmPassword: z.string(),
     terms: z.union([z.literal("on"), z.literal("true"), z.literal("1")]).optional(),
+    planKey: z.string().trim().max(64).optional().or(z.literal("")),
+    billingCycle: z.enum(["MONTHLY", "YEARLY"]).optional().default("MONTHLY"),
   })
   .refine((data) => data.password === data.confirmPassword, {
     message: "كلمتا المرور غير متطابقتين",

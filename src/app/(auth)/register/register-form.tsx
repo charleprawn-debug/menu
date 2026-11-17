@@ -9,9 +9,20 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/controls";
 import { useI18n } from "@/i18n/provider";
+import { formatMoney } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
 const initialState: ActionState = {};
+
+interface RegisterPlan {
+  key: string;
+  name: string;
+  nameEn: string | null;
+  monthlyPrice: number;
+  yearlyPrice: number;
+  currency: string;
+  trialDays: number;
+}
 
 function strengthOf(password: string): number {
   let score = 0;
@@ -23,8 +34,18 @@ function strengthOf(password: string): number {
   return Math.min(3, Math.ceil(score / 2));
 }
 
-export function RegisterForm() {
-  const { t } = useI18n();
+export function RegisterForm({
+  plan,
+  planKey,
+  planUnavailable,
+  billingCycle,
+}: {
+  plan: RegisterPlan | null;
+  planKey: string;
+  planUnavailable: boolean;
+  billingCycle: "MONTHLY" | "YEARLY";
+}) {
+  const { t, locale } = useI18n();
   const [state, formAction, pending] = useActionState(registerAction, initialState);
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -37,6 +58,35 @@ export function RegisterForm() {
           <AlertCircle className="mt-0.5 size-4 shrink-0" />
           <span>{state.error}</span>
         </div>
+      ) : null}
+
+      <input type="hidden" name="planKey" value={planKey} />
+      <input type="hidden" name="billingCycle" value={billingCycle} />
+
+      {planUnavailable ? (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm" role="alert">
+          <p className="font-semibold">{t("auth.register.planUnavailableTitle")}</p>
+          <p className="mt-1 text-muted-foreground">{t("auth.register.planUnavailableBody")}</p>
+          <div className="mt-2 flex gap-4 text-xs font-semibold">
+            <Link href="/pricing" className="text-primary hover:underline">{t("auth.register.viewPlans")}</Link>
+            <Link href="/register" className="text-primary hover:underline">{t("auth.register.continueWithoutPlan")}</Link>
+          </div>
+        </div>
+      ) : plan ? (
+        <section className="rounded-xl border border-primary/25 bg-primary/5 px-4 py-3" aria-label={t("auth.register.selectedPlan")}>
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <p className="text-xs font-medium text-muted-foreground">{t("auth.register.selectedPlan")}</p>
+              <p className="mt-0.5 font-semibold">{locale === "ar" ? plan.name : plan.nameEn || plan.name}</p>
+            </div>
+            <div className="text-end">
+              <p className="font-bold">{formatMoney(billingCycle === "YEARLY" ? plan.yearlyPrice : plan.monthlyPrice, plan.currency, locale)}</p>
+              <p className="text-xs text-muted-foreground">{billingCycle === "YEARLY" ? t("auth.register.perYear") : t("auth.register.perMonth")}</p>
+            </div>
+          </div>
+          {plan.trialDays > 0 ? <p className="mt-2 text-xs text-muted-foreground">{t("auth.register.trialDays", { days: plan.trialDays })}</p> : null}
+          <p className="mt-2 border-t border-primary/15 pt-2 text-xs text-muted-foreground">{t("auth.register.noChargeNote")}</p>
+        </section>
       ) : null}
 
       <div className="space-y-1.5">
@@ -129,7 +179,7 @@ export function RegisterForm() {
               />
             ))}
             <span className="text-[11px] text-muted-foreground">
-              {strength === 1 ? "ضعيفة" : strength === 2 ? "متوسطة" : "قوية"}
+              {strength === 1 ? (locale === "ar" ? "ضعيفة" : "Weak") : strength === 2 ? (locale === "ar" ? "متوسطة" : "Medium") : (locale === "ar" ? "قوية" : "Strong")}
             </span>
           </div>
         ) : null}

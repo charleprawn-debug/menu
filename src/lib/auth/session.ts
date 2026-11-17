@@ -9,6 +9,9 @@ export const SESSION_COOKIE = "df_session";
 export const RESTAURANT_COOKIE = "df_restaurant";
 export const LOCALE_COOKIE = "df_locale";
 const SESSION_DAYS = 30;
+const secureCookies = process.env.SESSION_COOKIE_SECURE === "true"
+  || process.env.NEXT_PUBLIC_APP_URL?.startsWith("https://") === true;
+const cookieSameSite: "lax" | "none" = secureCookies ? "none" : "lax";
 
 export function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
@@ -37,8 +40,8 @@ export async function createSession(userId: string): Promise<string> {
   const store = await cookies();
   store.set(SESSION_COOKIE, token, {
     httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    sameSite: cookieSameSite,
+    secure: secureCookies,
     path: "/",
     expires: expiresAt,
   });
@@ -84,8 +87,8 @@ export async function setRestaurantCookie(slug: string): Promise<void> {
   const store = await cookies();
   store.set(RESTAURANT_COOKIE, slug, {
     httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    sameSite: cookieSameSite,
+    secure: secureCookies,
     path: "/",
     maxAge: 60 * 60 * 24 * 365,
   });
@@ -95,8 +98,8 @@ export async function setLocaleCookie(locale: string): Promise<void> {
   const store = await cookies();
   store.set(LOCALE_COOKIE, locale, {
     httpOnly: false,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    sameSite: cookieSameSite,
+    secure: secureCookies,
     path: "/",
     maxAge: 60 * 60 * 24 * 365,
   });

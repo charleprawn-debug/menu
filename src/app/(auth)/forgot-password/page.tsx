@@ -2,7 +2,10 @@ import type { Metadata } from "next";
 import { getI18n } from "@/i18n";
 import { ForgotForm } from "./forgot-form";
 
-export const metadata: Metadata = { title: "استعادة كلمة المرور" };
+export async function generateMetadata(): Promise<Metadata> {
+  const { locale } = await getI18n();
+  return { title: locale === "ar" ? "استعادة كلمة المرور" : "Forgot password" };
+}
 
 export default async function ForgotPasswordPage() {
   const { t } = await getI18n();

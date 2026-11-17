@@ -2,7 +2,10 @@ import type { Metadata } from "next";
 import { getI18n } from "@/i18n";
 import { LoginForm } from "./login-form";
 
-export const metadata: Metadata = { title: "تسجيل الدخول" };
+export async function generateMetadata(): Promise<Metadata> {
+  const { locale } = await getI18n();
+  return { title: locale === "ar" ? "تسجيل الدخول" : "Sign in" };
+}
 
 export default async function LoginPage({
   searchParams,

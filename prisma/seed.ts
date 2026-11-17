@@ -1,11 +1,12 @@
+import { loadEnvConfig } from "@next/env";
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { randomBytes } from "node:crypto";
 import { syncPermissions, createRestaurantWithDefaults } from "../src/lib/services/restaurant";
 import { seedDemoRestaurant } from "./seed-demo";
 
+loadEnvConfig(process.cwd());
 const db = new PrismaClient();
-
-const PASSWORD = "Admin123!";
 
 async function truncateAll() {
   await db.$executeRawUnsafe(`
@@ -20,7 +21,27 @@ async function truncateAll() {
   `);
 }
 
+function assertSafeToSeed() {
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("Refusing to run the destructive demo seed in production.");
+  }
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) throw new Error("DATABASE_URL must be configured before running the demo seed.");
+  let host: string;
+  try {
+    host = new URL(connectionString).hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  } catch {
+    throw new Error("DATABASE_URL is invalid; refusing to truncate an unknown database.");
+  }
+  const localHosts = new Set(["localhost", "127.0.0.1", "::1"]);
+  if (!localHosts.has(host) && process.env.ALLOW_DESTRUCTIVE_DEMO_SEED !== "true") {
+    throw new Error("Refusing to truncate a remote database. Set ALLOW_DESTRUCTIVE_DEMO_SEED=true only for an intentional non-production reset.");
+  }
+}
+
 async function main() {
+  assertSafeToSeed();
+  const demoPassword = randomBytes(32).toString("base64url");
   console.log("→ Clearing existing data…");
   await truncateAll();
 
@@ -174,6 +195,7 @@ async function main() {
     { key: "default_currency", value: "SAR", group: "LOCALIZATION" },
     { key: "default_locale", value: "ar", group: "LOCALIZATION" },
     { key: "trial_days", value: 14, group: "BILLING" },
+    { key: "default_plan_key", value: "starter", group: "BILLING" },
     { key: "maintenance_mode", value: false, group: "SYSTEM" },
     { key: "allow_registration", value: true, group: "SYSTEM" },
     { key: "terms_url", value: "/terms", group: "LEGAL" },
@@ -184,7 +206,7 @@ async function main() {
   }
 
   console.log("→ Creating platform admin…");
-  const passwordHash = await bcrypt.hash(PASSWORD, 12);
+  const passwordHash = await bcrypt.hash(demoPassword, 12);
   const admin = await db.user.create({
     data: {
       name: "مدير المنصة",
@@ -440,13 +462,7 @@ async function main() {
 
   console.log("\n✔ Seed completed");
   console.log("────────────────────────────────────────");
-  console.log("Platform admin : admin@dineflow.app / Admin123!");
-  console.log("Restaurant owner: owner@dineflow.app / Admin123!");
-  console.log("Manager        : manager@dineflow.app / Admin123!");
-  console.log("Waiter         : waiter@dineflow.app / Admin123!");
-  console.log("Cashier        : cashier@dineflow.app / Admin123!");
-  console.log("Chef           : chef@dineflow.app / Admin123!");
-  console.log("Accountant     : accountant@dineflow.app / Admin123!");
+  console.log("Development-only generated password for local seeded accounts:", demoPassword);
   console.log("Demo menu      : /r/demo");
   console.log("────────────────────────────────────────\n");
 }

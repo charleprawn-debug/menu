@@ -444,11 +444,28 @@ model Restaurant {
   tables       Table[]
   orders       Order[]
   kitchenStations KitchenStation[]
+  mediaAssets  RestaurantMedia[]
   subscription Subscription?
 
   @@index([ownerId])
   @@index([status])
   @@map("restaurants")
+}
+
+model RestaurantMedia {
+  id           String   @id @default(cuid())
+  restaurantId String
+  kind         String
+  contentType  String
+  data         Bytes    @db.ByteA
+  sizeBytes    Int
+  isPublic     Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@index([restaurantId, kind])
+  @@map("restaurant_media")
 }
 
 model Branch {
@@ -1588,6 +1605,8 @@ model Plan {
 
   features      PlanFeature[]
   subscriptions Subscription[]
+  changesFrom   SubscriptionPlanChange[] @relation("PlanChangeFrom")
+  changesTo     SubscriptionPlanChange[] @relation("PlanChangeTo")
 
   @@map("plans")
 }
@@ -1639,6 +1658,7 @@ model Subscription {
   plan       Plan                  @relation(fields: [planId], references: [id])
   invoices   SubscriptionInvoice[]
   payments   SubscriptionPayment[]
+  planChanges SubscriptionPlanChange[]
 
   @@map("subscriptions")
 }
@@ -1646,6 +1666,7 @@ model Subscription {
 model SubscriptionInvoice {
   id             String        @id @default(cuid())
   subscriptionId String
+  idempotencyKey String?       @unique
   number         String        @unique
   amount         Decimal       @db.Decimal(12, 2)
   currency       String        @default("USD")
@@ -1657,7 +1678,8 @@ model SubscriptionInvoice {
   pdfUrl         String?
   createdAt      DateTime      @default(now())
 
-  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  subscription Subscription         @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  payments     SubscriptionPayment[]
 
   @@index([subscriptionId])
   @@map("subscription_invoices")
@@ -1670,14 +1692,36 @@ model SubscriptionPayment {
   amount         Decimal         @db.Decimal(12, 2)
   currency       String          @default("USD")
   method         PaymentMethod   @default(CARD)
-  status         PaymentTxStatus @default(SUCCEEDED)
+  status         PaymentTxStatus @default(PENDING)
   reference      String?
   paidAt         DateTime        @default(now())
 
-  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  subscription Subscription        @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  invoice      SubscriptionInvoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
 
   @@index([subscriptionId])
   @@map("subscription_payments")
+}
+
+model SubscriptionPlanChange {
+  id             String      @id @default(cuid())
+  subscriptionId String
+  fromPlanId     String
+  toPlanId       String
+  billingCycle   BillingCycle
+  effectiveAt    DateTime
+  status         String      @default("SCHEDULED")
+  requestedById  String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  appliedAt      DateTime?
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  fromPlan     Plan         @relation("PlanChangeFrom", fields: [fromPlanId], references: [id])
+  toPlan       Plan         @relation("PlanChangeTo", fields: [toPlanId], references: [id])
+
+  @@index([subscriptionId, status])
+  @@map("subscription_plan_changes")
 }
 
 model PlatformSetting {

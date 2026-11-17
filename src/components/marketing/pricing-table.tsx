@@ -104,7 +104,7 @@ export function PricingTable({ plans, features, locale }: { plans: PricingPlan[]
                     <div className="mt-1 text-xs text-muted-foreground">{ar ? "السعر الشهري حسب الخطة" : "Monthly price as configured"}</div>
                   )}
                   <Button asChild className="mt-5 w-full" variant={plan.isPopular ? "default" : "outline"}>
-                    <Link href="/register">
+                    <Link href={`/register?plan=${encodeURIComponent(plan.key)}&cycle=${cycle.toUpperCase()}`}>
                       {ar ? "أنشئ حساباً" : "Create an account"}
                     </Link>
                   </Button>
