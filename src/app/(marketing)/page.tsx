@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -9,22 +10,27 @@ import {
   Grid2x2,
   Layers,
   QrCode,
-  Quote,
   ShieldCheck,
   Smartphone,
   Sparkles,
-  Star,
   Users,
   UtensilsCrossed,
   Zap,
 } from "lucide-react";
 import { db } from "@/lib/db";
-import { getI18n } from "@/i18n";
+import { getI18n, getLocale } from "@/i18n";
 import { formatMoney, toNumber } from "@/lib/money";
-import { SiteHeader } from "@/components/marketing/site-header";
-import { SiteFooter } from "@/components/marketing/site-footer";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { marketingMetadata } from "@/lib/marketing/seo";
+
+export async function generateMetadata(): Promise<Metadata> {
+  const locale = await getLocale();
+  return marketingMetadata(locale, {
+    ar: { title: "نظام تشغيل المطاعم", description: "منيو رقمي ووصول الضيوف عبر QR وطاولات وتشغيل وتقارير في منصة تتوسع على مراحل." },
+    en: { title: "Restaurant operating system", description: "Digital menus, QR menu access, tables, operations and reporting in a platform rolling out in phases." },
+  }, "/");
+}
 
 export default async function LandingPage() {
   const { t, locale } = await getI18n();
@@ -38,38 +44,38 @@ export default async function LandingPage() {
   const features = [
     {
       icon: Smartphone,
-      title: locale === "ar" ? "منيو رقمي فوري" : "Instant digital menu",
+      title: locale === "ar" ? "منيو رقمي" : "Digital menu",
       body:
         locale === "ar"
-          ? "منيو سريع ومتوافق مع الهاتف، يتحدّث لحظياً عند تغيير الأسعار أو نفاد الأصناف."
-          : "A fast, mobile-first menu that updates instantly when prices change or items sell out.",
+          ? "المنيو العام يعرض تفاصيل الأصناف المنشورة؛ أدوات تحرير المنيو ستُستكمل في مرحلة مخصصة."
+          : "The public menu displays published item details; the full menu editor will be completed in its dedicated build phase.",
       color: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300",
     },
     {
       icon: QrCode,
-      title: locale === "ar" ? "طلبات QR على الطاولة" : "QR ordering at the table",
+      title: locale === "ar" ? "منيو عبر QR" : "QR menu access",
       body:
         locale === "ar"
-          ? "الزبون يمسح الكود ويطلب مباشرة — بدون تطبيق وبدون انتظار النادل."
-          : "Guests scan, browse and order directly — no app download, no waiting for a waiter.",
+          ? "رمز QR المرتبط برابط المنيو يفتحه في المتصفح؛ مولّد QR داخل التطبيق وإرسال الطلب سيأتيان في مراحل لاحقة."
+          : "A QR code linked to the menu URL opens it in a browser; in-app QR generation and guest ordering are later phases.",
       color: "bg-sky-50 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300",
     },
     {
       icon: ChefHat,
-      title: locale === "ar" ? "شاشة مطبخ ذكية" : "Smart kitchen display",
+      title: locale === "ar" ? "مسار المطبخ — مرحلة لاحقة" : "Kitchen workflow — later phase",
       body:
         locale === "ar"
-          ? "توزيع الطلبات على المحطات، مؤقتات تحضير، وتنبيهات فورية عند جاهزية الأصناف."
-          : "Route tickets to stations, track prep timers and get instant ready alerts.",
+          ? "شاشة المطبخ ومتابعة التحضير ستُبنيان بعد اكتمال مسار الطلبات."
+          : "The kitchen display and preparation tracking will follow completion of the order workflow.",
       color: "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300",
     },
     {
       icon: Grid2x2,
-      title: locale === "ar" ? "طاولات ومخطط تفاعلي" : "Tables & floor plan",
+      title: locale === "ar" ? "إدارة الطاولات — مرحلة لاحقة" : "Table management — later phase",
       body:
         locale === "ar"
-          ? "إدارة الطاولات والجلسات والحجوزات على مخطط مرئي يعكس صالة مطعمك."
-          : "Manage tables, sessions and reservations on a visual floor plan of your dining room.",
+          ? "مخطط الصالة والجلسات والحجوزات ضمن مرحلة تطوير الطاولات."
+          : "Floor plans, sessions and reservations belong to the upcoming table-management phase.",
       color: "bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300",
     },
     {
@@ -77,8 +83,8 @@ export default async function LandingPage() {
       title: locale === "ar" ? "تقارير وتحليلات" : "Reports & analytics",
       body:
         locale === "ar"
-          ? "مبيعات، منتجات، موظفون وأداء — تقارير واضحة وقابلة للتصدير في أي وقت."
-          : "Sales, products, staff and performance — clear, exportable reports anytime.",
+          ? "تُطوّر أدوات تحليل المبيعات والمنتجات والموظفين ضمن مراحل إطلاق التقارير."
+          : "Sales, product and staff analytics will roll out with the reporting workflows.",
       color: "bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300",
     },
     {
@@ -86,8 +92,8 @@ export default async function LandingPage() {
       title: locale === "ar" ? "مساعد ذكاء اصطناعي" : "AI assistant",
       body:
         locale === "ar"
-          ? "اسأل عن مبيعاتك، اطلب تحليل أدائك، أو اقترح عروضاً مبنية على بياناتك الحقيقية."
-          : "Ask about your sales, analyse performance, or get offers based on your real data.",
+          ? "المساعد الذكي ضمن خارطة التطوير، وسيتاح مع إطلاق مسارات التحليل المناسبة."
+          : "The AI assistant is on the roadmap and will follow rollout of the supporting analytics workflows.",
       color: "bg-teal-50 text-teal-700 dark:bg-teal-500/10 dark:text-teal-300",
     },
   ];
@@ -95,18 +101,18 @@ export default async function LandingPage() {
   const steps = [
     {
       number: "01",
-      title: locale === "ar" ? "أنشئ حسابك" : "Create your account",
-      body: locale === "ar" ? "سجّل في أقل من دقيقة، بدون بطاقة ائتمانية." : "Sign up in under a minute, no credit card required.",
+      title: locale === "ar" ? "استعرض المنيو التجريبي" : "Browse the sample menu",
+      body: locale === "ar" ? "تعرّف على تجربة تصفّح القائمة؛ لا يمكن إرسال الطلبات من المنيو حالياً." : "Explore the menu-browsing experience; ordering is not available from the menu yet.",
     },
     {
       number: "02",
-      title: locale === "ar" ? "جهّز منيوك وطاولاتك" : "Set up your menu & tables",
-      body: locale === "ar" ? "أضف الأقسام والمنتجات، وولّد أكواد QR لكل طاولة." : "Add categories and products, then generate a QR for every table.",
+      title: locale === "ar" ? "أنشئ حساباً وأكمل البيانات الأساسية" : "Create an account and add basic details",
+      body: locale === "ar" ? "تسجيل الحساب وبيانات المطعم الأولية متاحان؛ المعالج الكامل وتحرير المنيو والطاولات ستُستكمل لاحقاً." : "Account creation and initial restaurant details are available; full onboarding, menu editing and table tools are still upcoming.",
     },
     {
       number: "03",
-      title: locale === "ar" ? "استقبل أول طلب" : "Take your first order",
-      body: locale === "ar" ? "شارك المنيو وابدأ باستقبال الطلبات مباشرة من الجوال." : "Share your menu and start receiving orders straight from mobile.",
+      title: locale === "ar" ? "تابع مراحل الإطلاق" : "Follow the rollout",
+      body: locale === "ar" ? "الطلبات عبر الإنترنت والطاولات والمطبخ والاشتراكات تُستكمل في الخطوات المخصصة لها." : "Online ordering, table operations, kitchen workflows and subscriptions will be completed in their dedicated build steps.",
     },
   ];
 
@@ -115,35 +121,34 @@ export default async function LandingPage() {
       q: locale === "ar" ? "هل يحتاج الزبون لتحميل تطبيق؟" : "Does the customer need an app?",
       a:
         locale === "ar"
-          ? "لا. يفتح الزبون المنيو من متصفح الجوال عبر مسح QR أو الرابط، ويطلب مباشرة."
-          : "No. Guests open the menu in their mobile browser via QR or link and order instantly.",
+          ? "لا. يفتح الضيف المنيو في متصفح الهاتف عبر QR أو الرابط؛ إرسال الطلب إلكترونياً سيُتاح في مرحلة لاحقة."
+          : "No. Guests open the menu in a mobile browser via QR or link; online order submission will be available in a later phase.",
     },
     {
-      q: locale === "ar" ? "هل يدعم النظام اللغة العربية؟" : "Is Arabic supported?",
+      q: locale === "ar" ? "هل يدعم الموقع اللغة العربية والإنجليزية؟" : "Are Arabic and English supported?",
       a:
         locale === "ar"
-          ? "نعم، النظام عربي أولاً مع دعم كامل للإنجليزية واتجاه RTL في كل الواجهات."
-          : "Yes — Arabic-first with full English support and RTL across every interface.",
+          ? "نعم، صفحات الموقع والمنيو العام متاحة بالعربية والإنجليزية. بعض شاشات لوحة المطعم ما زالت ضمن مراحل البناء."
+          : "Yes, the marketing site and public menu are available in Arabic and English. Some restaurant-dashboard screens are still being built.",
     },
     {
-      q: locale === "ar" ? "هل يمكنني إدارة أكثر من فرع؟" : "Can I manage multiple branches?",
+      q: locale === "ar" ? "هل إدارة الفروع المتعددة متاحة الآن؟" : "Is multi-branch management available now?",
       a:
         locale === "ar"
-          ? "نعم، الباقات الأعلى تدعم فروعاً متعددة مع إعدادات وتقارير مستقلة لكل فرع."
-          : "Yes, higher plans support multiple branches with independent settings and reports.",
+          ? "إدارة الفروع ضمن خارطة المنتج؛ تفاصيل الحدود الظاهرة في الباقات هي إعدادات الخطة وليست تفعيل اشتراك أو ميزة تشغيلية حالياً."
+          : "Multi-branch management is on the product roadmap. Limits shown on pricing are plan settings, not an active subscription or operational feature today.",
     },
     {
       q: locale === "ar" ? "ماذا يحدث لبياناتي إذا أوقفت الاشتراك؟" : "What happens to my data if I cancel?",
       a:
         locale === "ar"
-          ? "تبقى بياناتك محفوظة وفق سياسة الاحتفاظ، ويمكنك إعادة التفعيل دون فقدان شيء."
-          : "Your data is retained under our retention policy and reactivation restores everything.",
+          ? "تختلف إتاحة البيانات بعد إيقاف الخدمة بحسب الاتفاق وسياسة الاحتفاظ. نزّل السجلات التي تحتاجها قبل الإيقاف وتواصل معنا للاستفسار عن حسابك."
+          : "Data availability after service ends depends on the applicable agreement and retention policy. Export records you need before cancellation and contact us about your account.",
     },
   ];
 
   return (
     <div className="min-h-screen bg-background">
-      <SiteHeader />
 
       {/* Hero */}
       <section className="relative overflow-hidden">
@@ -176,32 +181,13 @@ export default async function LandingPage() {
               </Button>
             </div>
             <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-3">
-              <div className="flex items-center gap-2">
-                <div className="flex -space-x-2 rtl:space-x-reverse">
-                  {["#059669", "#0ea5e9", "#f59e0b", "#8b5cf6"].map((color, index) => (
-                    <span
-                      key={color}
-                      className="flex size-8 items-center justify-center rounded-full border-2 border-background text-[10px] font-bold text-white"
-                      style={{ backgroundColor: color }}
-                    >
-                      {["MK", "SA", "OH", "NA"][index]}
-                    </span>
-                  ))}
-                </div>
-                <div className="text-xs">
-                  <div className="flex gap-0.5 text-amber-400">
-                    {Array.from({ length: 5 }).map((_, index) => (
-                      <Star key={index} className="size-3 fill-current" />
-                    ))}
-                  </div>
-                  <p className="mt-0.5 text-muted-foreground">
-                    {locale === "ar" ? "أكثر من 320 مطعم يثق بنا" : "Trusted by 320+ restaurants"}
-                  </p>
-                </div>
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Smartphone className="size-4 text-primary" />
+                {locale === "ar" ? "تجربة عبر متصفح الجوال" : "Mobile-browser experience"}
               </div>
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <ShieldCheck className="size-4 text-primary" />
-                {locale === "ar" ? "بياناتك مشفّرة ومعزولة" : "Encrypted & isolated data"}
+                {locale === "ar" ? "أدوار وصلاحيات للفريق" : "Team roles and permissions"}
               </div>
             </div>
           </div>
@@ -214,8 +200,8 @@ export default async function LandingPage() {
                 <span className="size-2.5 rounded-full bg-red-400" />
                 <span className="size-2.5 rounded-full bg-amber-400" />
                 <span className="size-2.5 rounded-full bg-emerald-400" />
-                <span className="mx-auto rounded-md bg-card px-3 py-0.5 text-[10px] text-muted-foreground" dir="ltr">
-                  app.dineflow.com/dashboard
+                <span className="mx-auto rounded-md bg-card px-3 py-0.5 text-[10px] text-muted-foreground">
+                  {locale === "ar" ? "معاينة لوحة التحكم · بيانات تجريبية" : "Dashboard preview · sample data"}
                 </span>
               </div>
               <div className="flex">
@@ -290,8 +276,8 @@ export default async function LandingPage() {
                 <Zap className="size-4" />
               </span>
               <div>
-                <p className="text-[10px] font-bold">طلب جديد وصل</p>
-                <p className="text-[9px] text-muted-foreground">منذ 3 ثوانٍ</p>
+                <p className="text-[10px] font-bold">{locale === "ar" ? "إشعار تجريبي" : "Sample notification"}</p>
+                <p className="text-[9px] text-muted-foreground">{locale === "ar" ? "بيانات توضيحية" : "Illustrative data"}</p>
               </div>
             </div>
             <div className="absolute -top-3 end-6 hidden items-center gap-1.5 rounded-full border bg-card px-3 py-1.5 shadow-card sm:flex">
@@ -302,14 +288,13 @@ export default async function LandingPage() {
         </div>
       </section>
 
-      {/* Stats */}
+      {/* Product facts */}
       <section className="border-y bg-card">
-        <div className="container grid grid-cols-2 gap-6 py-8 lg:grid-cols-4">
+        <div className="container grid grid-cols-1 gap-6 py-8 sm:grid-cols-3">
           {[
-            { value: "320+", label: t("landing.stats.restaurants") },
-            { value: "1.2M", label: t("landing.stats.orders") },
-            { value: "99.9%", label: t("landing.stats.uptime") },
-            { value: "4.9/5", label: t("landing.stats.rating") },
+            { value: "11", label: locale === "ar" ? "ميزة ضمن نطاق المنصة" : "features in the platform scope" },
+            { value: "AR · EN", label: locale === "ar" ? "واجهة عربية وإنجليزية" : "Arabic and English interface" },
+            { value: "QR", label: locale === "ar" ? "وصول للمنيو من المتصفح" : "Browser-based menu access" },
           ].map((stat) => (
             <div key={stat.label} className="text-center">
               <p className="text-2xl font-extrabold tracking-tight text-primary sm:text-3xl">{stat.value}</p>
@@ -329,18 +314,24 @@ export default async function LandingPage() {
           <p className="mt-3 text-muted-foreground">{t("landing.features.subtitle")}</p>
         </div>
         <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {features.map((feature) => (
-            <div
+          {features.map((feature, index) => (
+            <Link
+              href={`/features/${["digital-menu", "qr-ordering", "kitchen-display", "table-management", "analytics", "ai-assistant"][index]}`}
               key={feature.title}
-              className="group rounded-2xl border bg-card p-6 shadow-soft transition-all hover:-translate-y-0.5 hover:border-primary/25 hover:shadow-card"
+              className="group block rounded-2xl border bg-card p-6 shadow-soft transition-all hover:-translate-y-0.5 hover:border-primary/25 hover:shadow-card"
             >
               <span className={`flex size-11 items-center justify-center rounded-xl ${feature.color}`}>
                 <feature.icon className="size-5" />
               </span>
               <h3 className="mt-4 text-base font-semibold">{feature.title}</h3>
               <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{feature.body}</p>
-            </div>
+            </Link>
           ))}
+        </div>
+        <div className="mt-8 text-center">
+          <Button asChild variant="outline">
+            <Link href="/features">{locale === "ar" ? "استكشف جميع الميزات الـ11" : "Explore all 11 features"}</Link>
+          </Button>
         </div>
         <div className="mt-8 flex flex-wrap justify-center gap-2">
           {[
@@ -388,19 +379,19 @@ export default async function LandingPage() {
               {locale === "ar" ? "تجربة الزبون" : "Guest experience"}
             </Badge>
             <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">
-              {locale === "ar" ? "منيو يفتح الشهية… ويبيع." : "A menu that looks good and sells better."}
+              {locale === "ar" ? "منيو رقمي واضح وسهل التصفّح." : "A clear digital menu guests can browse."}
             </h2>
             <p className="mt-3 text-muted-foreground">
               {locale === "ar"
-                ? "صور واضحة، أسعار محدّثة، خيارات وإضافات، وسلة شراء سلسة — كل ذلك في متصفح الجوال وبدون تطبيق."
-                : "Clear photos, live prices, modifiers and a smooth cart — all in the mobile browser, no app needed."}
+                ? "اعرض الصور والوصف والأسعار في تجربة ويب ملائمة للجوال. المنيو الحالي للتصفّح؛ إرسال الطلب سيُضاف في مرحلة لاحقة."
+                : "Present photos, descriptions and prices in a mobile-friendly web menu. The current guest view is browse-only; online ordering will follow later."}
             </p>
             <ul className="mt-6 space-y-3">
               {[
                 locale === "ar" ? "تحميل فوري وتصميم خفيف على الإنترنت الضعيف" : "Fast loading and a lightweight design on slow networks",
-                locale === "ar" ? "بحث وتصنيفات وعروض وأكثر مبيعاً" : "Search, categories, offers and best sellers",
-                locale === "ar" ? "طلب من الطاولة أو استلام أو توصيل" : "Dine-in, pickup or delivery ordering",
-                locale === "ar" ? "استدعاء النادل وطلب الفاتورة بضغطة" : "Call a waiter or request the bill in one tap",
+                locale === "ar" ? "بحث وتنقّل بين التصنيفات وأصناف مميزة" : "Search, category navigation and featured dishes",
+                locale === "ar" ? "عرض عربي أو إنجليزي بحسب محتوى المنيو" : "Arabic or English display based on menu content",
+                locale === "ar" ? "رابط اتصال بالمطعم عند إضافة رقم الهاتف" : "A call link when the restaurant adds its phone number",
               ].map((item) => (
                 <li key={item} className="flex items-start gap-2.5 text-sm">
                   <Check className="mt-0.5 size-4 shrink-0 text-primary" />
@@ -442,7 +433,7 @@ export default async function LandingPage() {
                   </div>
                   <div className="space-y-2">
                     {[
-                      { name: "مشاوي مشكلة", price: "85", emoji: "🍢", tag: "الأكثر طلباً" },
+                      { name: "مشاوي مشكلة", price: "85", emoji: "🍢", tag: locale === "ar" ? "طبق مميز" : "Featured dish" },
                       { name: "حمص باللحمة", price: "32", emoji: "🥣" },
                       { name: "فتوش", price: "24", emoji: "🥗" },
                       { name: "كنافة", price: "28", emoji: "🍮" },
@@ -456,13 +447,11 @@ export default async function LandingPage() {
                           {item.tag ? <p className="text-[8px] text-primary">{item.tag}</p> : null}
                           <p className="text-[9px] font-bold">{item.price} ر.س</p>
                         </div>
-                        <span className="flex size-5 items-center justify-center rounded-md bg-primary text-[11px] text-white">+</span>
                       </div>
                     ))}
                   </div>
-                  <div className="mt-2 flex items-center justify-between rounded-xl bg-primary px-3 py-2 text-white">
-                    <span className="text-[9px]">3 أصناف · 141 ر.س</span>
-                    <span className="text-[9px] font-bold">عرض السلة</span>
+                  <div className="mt-2 flex items-center justify-center rounded-xl border bg-muted/40 px-3 py-2 text-center text-[9px] text-muted-foreground">
+                    {locale === "ar" ? "معاينة المنيو — التصفّح فقط" : "Menu preview — browse only"}
                   </div>
                 </div>
               </div>
@@ -489,11 +478,11 @@ export default async function LandingPage() {
               >
                 {plan.isPopular ? (
                   <Badge className="absolute -top-3 start-1/2 z-10 -translate-x-1/2 bg-primary text-primary-foreground shadow-card rtl:translate-x-1/2">
-                    {locale === "ar" ? "الأكثر شيوعاً" : "Most popular"}
+                    {locale === "ar" ? "موصى بها" : "Recommended"}
                   </Badge>
                 ) : null}
                 <h3 className="text-lg font-bold">{locale === "ar" ? plan.name : plan.nameEn || plan.name}</h3>
-                <p className="mt-1 text-xs text-muted-foreground">{plan.description}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{locale === "ar" ? plan.description : plan.descriptionEn || plan.description}</p>
                 <div className="mt-5 flex items-end gap-1">
                   <span className="text-3xl font-extrabold tracking-tight">
                     {formatMoney(plan.monthlyPrice, plan.currency, locale, { maximumFractionDigits: 0 })}
@@ -515,7 +504,7 @@ export default async function LandingPage() {
                       {item}
                     </li>
                   ))}
-                  {plan.features.slice(0, 5).map((planFeature) => (
+                  {plan.features.filter((planFeature) => planFeature.enabled).slice(0, 5).map((planFeature) => (
                     <li key={planFeature.featureId} className="flex items-center gap-2 text-xs text-muted-foreground">
                       <Check className="size-3.5 text-primary" />
                       {locale === "ar" ? planFeature.feature.nameAr : planFeature.feature.nameEn}
@@ -530,60 +519,33 @@ export default async function LandingPage() {
               {locale === "ar" ? "سيتم عرض الباقات بعد إعداد المنصة." : "Plans will appear once the platform is seeded."}
             </p>
           ) : null}
+          <div className="mt-8 text-center">
+            <Button asChild variant="outline"><Link href="/pricing">{locale === "ar" ? "قارن جميع الأسعار والميزات" : "Compare all plans and features"}</Link></Button>
+          </div>
         </div>
       </section>
 
-      {/* Testimonials */}
-      <section className="container py-20">
-        <div className="mx-auto max-w-2xl text-center">
-          <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">{t("landing.testimonials.title")}</h2>
-        </div>
-        <div className="mt-10 grid gap-4 md:grid-cols-3">
-          {[
-            {
-              quote:
-                locale === "ar"
-                  ? "أول مرة أحس إن عندي رؤية كاملة عن مطعمي من الجوال. الطلبات صارت أسرع والمطبخ أهدأ."
-                  : "For the first time I have full visibility of my restaurant from my phone. Orders are faster and the kitchen is calmer.",
-              name: "سامي العتيبي",
-              role: locale === "ar" ? "مالك · مطعم السدة" : "Owner · Al-Saddah",
-            },
-            {
-              quote:
-                locale === "ar"
-                  ? "المنيو الرقمي رفع متوسط الفاتورة 18%، لأن الزبون صار يضيف إضافات بسهولة."
-                  : "The digital menu lifted our average ticket by 18% because guests add extras effortlessly.",
-              name: "نور الحمادي",
-              role: locale === "ar" ? "مديرة · كافيه نور" : "Manager · Noor Cafe",
-            },
-            {
-              quote:
-                locale === "ar"
-                  ? "التقارير وحدها تستاهل. أعرف أي صنف يربح وأي صنف أخفيه، بدون جداول معقدة."
-                  : "The reports alone are worth it. I know which item earns and which to drop, without spreadsheets.",
-              name: "خالد منصور",
-              role: locale === "ar" ? "شريك · بيت المشاوي" : "Partner · Grill House",
-            },
-          ].map((item) => (
-            <div key={item.name} className="rounded-2xl border bg-card p-6 shadow-soft">
-              <Quote className="size-7 text-primary/20" />
-              <p className="mt-3 text-sm leading-relaxed">{item.quote}</p>
-              <div className="mt-5 flex items-center gap-2.5">
-                <span className="flex size-9 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
-                  {item.name.slice(0, 2)}
-                </span>
-                <div>
-                  <p className="text-xs font-semibold">{item.name}</p>
-                  <p className="text-[11px] text-muted-foreground">{item.role}</p>
-                </div>
-                <div className="ms-auto flex gap-0.5 text-amber-400">
-                  {Array.from({ length: 5 }).map((_, index) => (
-                    <Star key={index} className="size-3 fill-current" />
-                  ))}
-                </div>
-              </div>
-            </div>
-          ))}
+      {/* Operating principles */}
+      <section className="border-y bg-muted/20 py-20">
+        <div className="container">
+          <div className="mx-auto max-w-2xl text-center">
+            <Badge variant="muted" className="mb-3">{locale === "ar" ? "مصمّم حول التشغيل" : "Designed around operations"}</Badge>
+            <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">{locale === "ar" ? "ابدأ بالمنيو، وتوسّع مع المراحل القادمة." : "Start with the menu and grow into upcoming phases."}</h2>
+            <p className="mt-3 text-muted-foreground">{locale === "ar" ? "المنيو العام للتصفح متاح الآن؛ الطلبات والطاولات والمطبخ والتقارير قيد الإطلاق المرحلي." : "The public menu is available for browsing; orders, tables, kitchen and reports are rolling out in later phases."}</p>
+          </div>
+          <div className="mt-10 grid gap-4 md:grid-cols-3">
+            {[
+              { icon: QrCode, title: locale === "ar" ? "تصفح المنيو عبر QR" : "Browse the menu via QR", body: locale === "ar" ? "يفتح رابط المنيو في متصفح الجوال؛ إرسال الطلب غير متاح حالياً." : "The menu link opens in a mobile browser; online order submission is not active yet." },
+              { icon: ChefHat, title: locale === "ar" ? "الطلبات والمطبخ — لاحقاً" : "Orders and kitchen — later", body: locale === "ar" ? "سلة الضيف وتوجيه الطلب وشاشة المطبخ ضمن خطوات التطوير القادمة." : "Guest carts, order routing and kitchen display are part of upcoming build steps." },
+              { icon: BarChart3, title: locale === "ar" ? "التقارير — مرحلة لاحقة" : "Reporting — later phase", body: locale === "ar" ? "تحليل الأداء والتقارير التشغيلية ستُستكمل في مرحلة التقارير." : "Performance analytics and operational reports will be completed in the reporting phase." },
+            ].map(({ icon: Icon, title, body }) => (
+              <article key={title} className="rounded-2xl border bg-card p-6 shadow-soft">
+                <span className="flex size-11 items-center justify-center rounded-xl bg-primary/10 text-primary"><Icon className="size-5" /></span>
+                <h3 className="mt-4 font-semibold">{title}</h3>
+                <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{body}</p>
+              </article>
+            ))}
+          </div>
         </div>
       </section>
 
@@ -603,6 +565,9 @@ export default async function LandingPage() {
                 <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{faq.a}</p>
               </details>
             ))}
+          </div>
+          <div className="mt-7 text-center">
+            <Button asChild variant="link"><Link href="/faq">{locale === "ar" ? "تصفّح جميع الأسئلة الشائعة" : "Browse all frequently asked questions"}</Link></Button>
           </div>
         </div>
       </section>
@@ -627,13 +592,12 @@ export default async function LandingPage() {
               </Button>
             </div>
             <p className="mt-4 text-[11px] text-white/40">
-              {locale === "ar" ? "بدون بطاقة ائتمانية · إلغاء في أي وقت" : "No credit card · Cancel anytime"}
+              {locale === "ar" ? "لا يُطلب دفع عند إنشاء الحساب" : "No payment is required at sign-up"}
             </p>
           </div>
         </div>
       </section>
 
-      <SiteFooter />
     </div>
   );
 }

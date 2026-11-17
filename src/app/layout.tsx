@@ -3,9 +3,10 @@ import "./globals.css";
 import { Providers } from "@/components/providers";
 import { getLocale } from "@/i18n";
 import { dirFor } from "@/i18n/config";
+import { getPublicSiteOrigin } from "@/lib/marketing/seo";
 
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"),
+  metadataBase: getPublicSiteOrigin() ? new URL(getPublicSiteOrigin()!) : undefined,
   title: {
     default: "DineFlow — نظام تشغيل المطاعم",
     template: "%s · DineFlow",

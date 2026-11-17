@@ -4,36 +4,36 @@ import { getI18n } from "@/i18n";
 
 export async function SiteFooter() {
   const { t, locale } = await getI18n();
-
   const columns = [
     {
       title: t("footer.product"),
       links: [
-        { label: t("footer.features"), href: "/#features" },
-        { label: t("footer.pricing"), href: "/#pricing" },
+        { label: t("footer.features"), href: "/features" },
+        { label: t("footer.pricing"), href: "/pricing" },
         { label: t("footer.demo"), href: "/r/demo" },
+        { label: locale === "ar" ? "الأسئلة الشائعة" : "FAQ", href: "/faq" },
       ],
     },
     {
       title: t("footer.company"),
       links: [
-        { label: t("footer.about"), href: "/#about" },
-        { label: t("footer.contact"), href: "/#contact" },
+        { label: t("footer.about"), href: "/about" },
+        { label: t("footer.contact"), href: "/contact" },
       ],
     },
     {
       title: t("footer.resources"),
       links: [
-        { label: t("footer.help"), href: "/#faq" },
-        { label: t("nav.kitchen"), href: "/kitchen" },
-        { label: t("nav.pos"), href: "/pos" },
+        { label: locale === "ar" ? "ابدأ الآن" : "Get started", href: "/register" },
+        { label: locale === "ar" ? "الأسئلة الشائعة" : "FAQ", href: "/faq" },
+        { label: locale === "ar" ? "استعرض المنيو" : "Try the menu", href: "/r/demo" },
       ],
     },
     {
       title: t("footer.legal"),
       links: [
-        { label: t("footer.terms"), href: "/#terms" },
-        { label: t("footer.privacy"), href: "/#privacy" },
+        { label: t("footer.terms"), href: "/terms" },
+        { label: t("footer.privacy"), href: "/privacy" },
       ],
     },
   ];
@@ -65,9 +65,7 @@ export async function SiteFooter() {
           ))}
         </div>
         <div className="mt-10 flex flex-col items-center justify-between gap-3 border-t pt-6 text-xs text-muted-foreground sm:flex-row">
-          <p>
-            © {new Date().getFullYear()} DineFlow. {t("footer.rights")}
-          </p>
+          <p>© {new Date().getFullYear()} DineFlow. {t("footer.rights")}</p>
           <p dir="ltr">Made for modern restaurants · v1.0</p>
         </div>
       </div>

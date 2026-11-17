@@ -27,9 +27,10 @@ export default async function AdminDashboardPage() {
         title={locale === "ar" ? "إدارة منصة DineFlow" : "DineFlow platform admin"}
         description={locale === "ar" ? "نظرة عامة على المنصة (اللوحة الكاملة في الخطوة 10)." : "Platform overview (full console arrives in step 10)."}
         actions={
-          <Button asChild variant="outline" size="sm">
-            <Link href="/app/dashboard">{locale === "ar" ? "لوحة المطعم" : "Restaurant dashboard"}</Link>
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button asChild variant="outline" size="sm"><Link href="/admin/inquiries">{locale === "ar" ? "استفسارات الموقع" : "Website inquiries"}</Link></Button>
+            <Button asChild variant="outline" size="sm"><Link href="/app/dashboard">{locale === "ar" ? "لوحة المطعم" : "Restaurant dashboard"}</Link></Button>
+          </div>
         }
       />
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

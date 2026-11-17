@@ -1543,12 +1543,33 @@ model CustomerReview {
   @@map("customer_reviews")
 }
 
+model MarketingInquiry {
+  id             String   @id @default(cuid())
+  name           String
+  email          String
+  phone          String?
+  restaurantName String?
+  subject        String
+  message        String   @db.Text
+  status         String   @default("NEW")
+  source         String   @default("contact")
+  sourceIpHash   String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([status, createdAt])
+  @@index([email, createdAt])
+  @@index([sourceIpHash, createdAt])
+  @@map("marketing_inquiries")
+}
+
 model Plan {
   id                String   @id @default(cuid())
   key               String   @unique
   name              String
   nameEn            String?
   description       String?  @db.Text
+  descriptionEn     String?  @db.Text
   monthlyPrice      Decimal  @default(0) @db.Decimal(12, 2)
   yearlyPrice       Decimal  @default(0) @db.Decimal(12, 2)
   currency          String   @default("USD")

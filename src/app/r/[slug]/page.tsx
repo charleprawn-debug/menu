@@ -2,12 +2,16 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { getLocale } from "@/i18n";
+import { getPublicSiteOrigin } from "@/lib/marketing/seo";
 import { MenuView } from "./menu-view";
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   const { slug } = await params;
-  const restaurant = await db.restaurant.findUnique({
-    where: { slug },
+  const locale = await getLocale();
+  const origin = getPublicSiteOrigin();
+  const menuPath = `/r/${encodeURIComponent(slug)}`;
+  const restaurant = await db.restaurant.findFirst({
+    where: { slug, deletedAt: null, status: { in: ["ACTIVE", "PENDING"] } },
     select: { name: true, description: true, seo: true, coverUrl: true },
   });
   if (!restaurant) return { title: "Menu not found" };
@@ -15,7 +19,11 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   return {
     title: seo.title || restaurant.name,
     description: seo.description || restaurant.description || undefined,
-    openGraph: { title: seo.title || restaurant.name, images: restaurant.coverUrl ? [restaurant.coverUrl] : undefined },
+    alternates: origin ? {
+      canonical: `${origin}/${locale}${menuPath}`,
+      languages: { ar: `${origin}/ar${menuPath}`, en: `${origin}/en${menuPath}` },
+    } : undefined,
+    openGraph: { title: seo.title || restaurant.name, url: origin ? `${origin}/${locale}${menuPath}` : undefined, images: restaurant.coverUrl ? [restaurant.coverUrl] : undefined },
   };
 }
 
