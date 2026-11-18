@@ -255,6 +255,54 @@
     {
       "path": "/en/app/menu/preview",
       "title": "English menu preview"
+    },
+    {
+      "path": "/ar/app/tables/tables",
+      "title": "AR tables management"
+    },
+    {
+      "path": "/ar/app/tables/floorplan",
+      "title": "AR floor plan"
+    },
+    {
+      "path": "/ar/app/tables/qr",
+      "title": "AR table QR codes"
+    },
+    {
+      "path": "/ar/app/tables/sessions",
+      "title": "AR table sessions"
+    },
+    {
+      "path": "/ar/app/tables/reservations",
+      "title": "AR reservations"
+    },
+    {
+      "path": "/ar/app/tables",
+      "title": "AR tables management"
+    },
+    {
+      "path": "/en/app/tables/tables",
+      "title": "EN tables management"
+    },
+    {
+      "path": "/en/app/tables/floorplan",
+      "title": "EN floor plan"
+    },
+    {
+      "path": "/en/app/tables/qr",
+      "title": "EN table QR codes"
+    },
+    {
+      "path": "/en/app/tables/sessions",
+      "title": "EN table sessions"
+    },
+    {
+      "path": "/en/app/tables/reservations",
+      "title": "EN reservations"
+    },
+    {
+      "path": "/en/app/tables",
+      "title": "EN tables management"
     }
   ]
 }
