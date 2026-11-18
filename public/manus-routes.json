@@ -303,6 +303,38 @@
     {
       "path": "/en/app/tables",
       "title": "EN tables management"
+    },
+    {
+      "path": "/ar/app/orders",
+      "title": "AR orders"
+    },
+    {
+      "path": "/ar/app/orders/all",
+      "title": "AR orders/all"
+    },
+    {
+      "path": "/ar/app/orders/new",
+      "title": "AR orders/new"
+    },
+    {
+      "path": "/ar/app/orders/settings",
+      "title": "AR orders/settings"
+    },
+    {
+      "path": "/en/app/orders",
+      "title": "EN orders"
+    },
+    {
+      "path": "/en/app/orders/all",
+      "title": "EN orders/all"
+    },
+    {
+      "path": "/en/app/orders/new",
+      "title": "EN orders/new"
+    },
+    {
+      "path": "/en/app/orders/settings",
+      "title": "EN orders/settings"
     }
   ]
 }
