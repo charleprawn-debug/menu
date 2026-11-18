@@ -30,12 +30,14 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
 export default async function PublicMenuPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const locale = await getLocale();
+  const now = new Date();
 
   const restaurant = await db.restaurant.findFirst({
     where: { slug, deletedAt: null, status: { in: ["ACTIVE", "PENDING"] } },
     include: {
+      menus: { where: { status: "ACTIVE", OR: [{ isDefault: true }, { startsAt: null }, { startsAt: { lte: now } }], AND: [{ OR: [{ endsAt: null }, { endsAt: { gte: now } }] }] }, orderBy: [{ isDefault: "desc" }, { startsAt: "desc" }], take: 1 },
       categories: {
-        where: { isVisible: true },
+        where: { isVisible: true, AND: [{ OR: [{ availableFrom: null }, { availableFrom: { lte: now } }] }, { OR: [{ availableTo: null }, { availableTo: { gte: now } }] }] },
         orderBy: { sortOrder: "asc" },
         include: {
           products: {
@@ -106,7 +108,7 @@ export default async function PublicMenuPage({ params }: { params: Promise<{ slu
         todayHours: today ? `${today.open} – ${today.close}` : null,
         theme: (restaurant.menuTheme ?? {}) as { layout?: string; showCalories?: boolean; showAllergens?: boolean; footerText?: string },
       }}
-      categories={restaurant.categories.map((category) => ({
+      categories={restaurant.categories.filter((category) => !category.menuId || category.menuId === restaurant.menus[0]?.id).map((category) => ({
         id: category.id,
         name: locale === "ar" ? category.nameAr : category.nameEn || category.nameAr,
         imageUrl: category.imageUrl,

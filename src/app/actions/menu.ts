@@ -67,6 +67,7 @@ export async function saveCategoryAction(form: FormData) {
     availableFrom: value(form, "availableFrom"), availableTo: value(form, "availableTo"), isVisible: bool(form, "isVisible"),
   });
   if (!parsed.success) fail("INVALID_CATEGORY");
+  if (parsed.data.availableFrom && parsed.data.availableTo && new Date(parsed.data.availableFrom) > new Date(parsed.data.availableTo)) fail("INVALID_CATEGORY_DATES");
   const data = {
     menuId: parsed.data.menuId || null,
     nameAr: parsed.data.nameAr, nameEn: parsed.data.nameEn || null, description: parsed.data.description || null,
@@ -237,6 +238,7 @@ export async function saveMenuAction(form: FormData) {
   const membership=await tenant("menu.themes.manage"); const id=value(form,"id")||undefined;
   const parsed=z.object({name:text(120).min(1),description:optionalText(1000),type:text(40),startsAt:date,endsAt:date,status:z.enum(["DRAFT","ACTIVE","ARCHIVED"]),isDefault:z.boolean()}).safeParse({name:value(form,"name"),description:value(form,"description"),type:value(form,"type")||"SEASONAL",startsAt:value(form,"startsAt"),endsAt:value(form,"endsAt"),status:value(form,"status")||"DRAFT",isDefault:bool(form,"isDefault")});
   if(!parsed.success) fail("INVALID_MENU");
+  if (parsed.data.startsAt && parsed.data.endsAt && new Date(parsed.data.startsAt) > new Date(parsed.data.endsAt)) fail("INVALID_MENU_DATES");
   const data={name:parsed.data.name,description:parsed.data.description||null,type:parsed.data.type,status:parsed.data.status,startsAt:parsed.data.startsAt?new Date(parsed.data.startsAt):null,endsAt:parsed.data.endsAt?new Date(parsed.data.endsAt):null,isDefault:parsed.data.isDefault};
   await db.$transaction(async(tx)=>{if(data.isDefault) await tx.menu.updateMany({where:{restaurantId:membership.restaurantId},data:{isDefault:false}}); if(id){await tx.menu.updateMany({where:{id,restaurantId:membership.restaurantId},data});}else await tx.menu.create({data:{restaurantId:membership.restaurantId,...data}});}); refresh();
 }
