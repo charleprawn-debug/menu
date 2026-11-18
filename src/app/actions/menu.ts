@@ -253,3 +253,70 @@ export async function resetMenuThemeAction() { const membership=await tenant("me
 export async function importProductsCsvAction(form: FormData) {
   const membership=await tenant("menu.import"); const raw=form.get("file"); if(!(raw instanceof File) || raw.size>5*1024*1024) fail("INVALID_FILE"); const content=await raw.text(); const lines=content.split(/\r?\n/).filter(Boolean); if(lines.length<2) fail("EMPTY_FILE"); const headers=lines[0].split(",").map(x=>x.trim().toLowerCase()); const index=(name:string)=>headers.indexOf(name); const nameIndex=index("namear"); const priceIndex=index("price"); if(nameIndex<0||priceIndex<0) fail("CSV_HEADERS_REQUIRED"); let created=0; for(const line of lines.slice(1)){const cols=line.split(","); const name=cols[nameIndex]?.trim(); const price=Number(cols[priceIndex]); if(!name||!Number.isFinite(price)||price<0) continue; await db.product.create({data:{restaurantId:membership.restaurantId,nameAr:name,nameEn:cols[index("nameen")]?.trim()||null,descriptionAr:cols[index("descriptionar")]?.trim()||null,price:new Prisma.Decimal(price),isVisible:false,availability:"HIDDEN"}}); created++;} await logActivity({restaurantId:membership.restaurantId,actorId:membership.auth.user.id,action:"menu.products.imported",entity:"Product",description:`Imported ${created} products from CSV`}); refresh();
 }
+
+
+function detectMenuImage(bytes: Uint8Array): { type: "image/png" | "image/jpeg" | "image/webp" } | null {
+  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47 && bytes[4] === 0x0d && bytes[5] === 0x0a && bytes[6] === 0x1a && bytes[7] === 0x0a) return { type: "image/png" };
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return { type: "image/jpeg" };
+  if (bytes.length >= 12 && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 && bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) return { type: "image/webp" };
+  return null;
+}
+
+export async function uploadProductImageAction(form: FormData) {
+  const membership = await tenant("menu.products.update");
+  const productId = value(form, "productId");
+  const file = form.get("file");
+  if (!(file instanceof File) || file.size === 0 || file.size > 5 * 1024 * 1024) fail("INVALID_IMAGE");
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const verified = detectMenuImage(bytes);
+  if (!verified) fail("INVALID_IMAGE");
+  const product = await db.product.findFirst({ where: { id: productId, restaurantId: membership.restaurantId, deletedAt: null }, select: { id: true, imageUrl: true } });
+  if (!product) fail("NOT_FOUND");
+  const subscription = await db.subscription.findFirst({ where: { restaurantId: membership.restaurantId }, select: { plan: { select: { storageMb: true } } } });
+  const storageLimit = subscription?.plan.storageMb ?? 100;
+  const stored = await db.restaurantMedia.aggregate({ where: { restaurantId: membership.restaurantId, sizeBytes: { gt: 0 } }, _sum: { sizeBytes: true } });
+  const oldId = product.imageUrl?.match(/^\/api\/media\/([a-zA-Z0-9_-]+)$/)?.[1];
+  const oldMedia = oldId ? await db.restaurantMedia.findFirst({ where: { id: oldId, restaurantId: membership.restaurantId, kind: "product" }, select: { id: true, sizeBytes: true } }) : null;
+  const currentBytes = (stored._sum.sizeBytes ?? 0) - (oldMedia?.sizeBytes ?? 0);
+  if (storageLimit !== -1 && currentBytes + bytes.length > storageLimit * 1024 * 1024) fail("MEDIA_STORAGE_LIMIT");
+  const media = await db.$transaction(async (tx) => {
+    const created = await tx.restaurantMedia.create({ data: { restaurantId: membership.restaurantId, kind: "product", contentType: verified.type, data: Buffer.from(bytes), sizeBytes: bytes.length, isPublic: true } });
+    await tx.product.update({ where: { id: product.id }, data: { imageUrl: `/api/media/${created.id}` } });
+    if (oldMedia) await tx.restaurantMedia.delete({ where: { id: oldMedia.id } });
+    return created;
+  });
+  await logActivity({ restaurantId: membership.restaurantId, actorId: membership.auth.user.id, action: "menu.product.image_uploaded", entity: "Product", entityId: product.id, newValue: { mediaId: media.id } });
+  refresh();
+}
+
+export async function reorderMenuItemsAction(form: FormData) {
+  const membership = await tenant(value(form, "kind") === "category" ? "menu.categories.manage" : "menu.products.update");
+  const kind = value(form, "kind");
+  const ids = json<string[]>(form, "ids", []).filter(Boolean);
+  if (!ids.length || !["category", "product"].includes(kind)) fail("INVALID_ORDER");
+  if (kind === "category") {
+    const valid = await db.menuCategory.count({ where: { restaurantId: membership.restaurantId, id: { in: ids } } });
+    if (valid !== ids.length) fail("INVALID_ORDER");
+    await db.$transaction(ids.map((id, index) => db.menuCategory.update({ where: { id }, data: { sortOrder: index } })));
+  } else {
+    const valid = await db.product.count({ where: { restaurantId: membership.restaurantId, id: { in: ids }, deletedAt: null } });
+    if (valid !== ids.length) fail("INVALID_ORDER");
+    await db.$transaction(ids.map((id, index) => db.product.update({ where: { id }, data: { sortOrder: index } })));
+  }
+  refresh();
+}
+
+export async function bulkProductAction(form: FormData) {
+  const membership = await tenant("menu.products.update");
+  const ids = json<string[]>(form, "ids", []).filter(Boolean);
+  const operation = value(form, "operation");
+  if (!ids.length || !["show", "hide", "out", "available", "delete"].includes(operation)) fail("INVALID_BULK_OPERATION");
+  const where = { restaurantId: membership.restaurantId, id: { in: ids }, deletedAt: null };
+  if (operation === "delete") await db.product.updateMany({ where, data: { deletedAt: new Date(), isVisible: false, availability: "HIDDEN" } });
+  if (operation === "show") await db.product.updateMany({ where, data: { isVisible: true, availability: "ALWAYS" } });
+  if (operation === "hide") await db.product.updateMany({ where, data: { isVisible: false, availability: "HIDDEN" } });
+  if (operation === "out") await db.product.updateMany({ where, data: { isVisible: true, availability: "OUT_OF_STOCK" } });
+  if (operation === "available") await db.product.updateMany({ where, data: { isVisible: true, availability: "ALWAYS" } });
+  await logActivity({ restaurantId: membership.restaurantId, actorId: membership.auth.user.id, action: "menu.products.bulk_updated", entity: "Product", description: `${operation} applied to ${ids.length} products`, newValue: { ids, operation } });
+  refresh();
+}
