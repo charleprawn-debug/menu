@@ -66,7 +66,8 @@ export async function assertPlanFeature(restaurantId: string, featureKey: string
  * Check a plan allowance using both the current DB plan and a server-side usage count.
  * The result is useful to callers for limit messaging; no client-provided usage/limit is trusted.
  */
-export async function assertPlanLimit(restaurantId: string, key: SubscriptionLimitKey) {
+export async function assertPlanLimit(restaurantId: string, key: SubscriptionLimitKey, requested = 1) {
+  if (!Number.isSafeInteger(requested) || requested < 1) throw new Error("INVALID_PLAN_USAGE");
   const subscription = await assertSubscriptionAccess(restaurantId);
   const plan = subscription.plan;
   let usage: number;
@@ -118,6 +119,6 @@ export async function assertPlanLimit(restaurantId: string, key: SubscriptionLim
   }
 
   if (limit === -1) limit = null;
-  if (limit !== null && usage >= limit) throw new Error("PLAN_LIMIT_REACHED");
-  return { usage, limit, remaining: limit === null ? null : Math.max(0, limit - usage) };
+  if (limit !== null && usage + requested > limit) throw new Error("PLAN_LIMIT_REACHED");
+  return { usage, limit, requested, remaining: limit === null ? null : Math.max(0, limit - usage - requested) };
 }

@@ -8,6 +8,8 @@ import { db } from "@/lib/db";
 import type { PermissionKey } from "@/lib/permissions";
 import { requireRestaurant } from "@/lib/auth/context";
 import { logActivity } from "@/lib/audit";
+import { assertPlanFeature, assertPlanLimit } from "@/lib/services/subscription";
+import { parseCsvRecords } from "@/lib/csv";
 
 const text = (max: number) => z.string().trim().max(max);
 const optionalText = (max: number) => text(max).optional().or(z.literal(""));
@@ -35,6 +37,7 @@ function fail(message: string): never { throw new Error(message); }
 async function tenant(permission: PermissionKey) {
   const membership = await requireRestaurant();
   if (!membership.isOwner && !membership.permissions.has(permission)) fail("FORBIDDEN");
+  await assertPlanFeature(membership.restaurantId, "digital_menu");
   return membership;
 }
 function refresh() {
@@ -59,6 +62,7 @@ const categorySchema = z.object({
 
 export async function saveCategoryAction(form: FormData) {
   const membership = await tenant("menu.categories.manage");
+  await assertPlanFeature(membership.restaurantId, "digital_menu");
   const parsed = categorySchema.safeParse({
     id: value(form, "id") || undefined,
     menuId: value(form, "menuId") || undefined,
@@ -136,6 +140,8 @@ export async function saveProductAction(form: FormData) {
   const membership = await requireRestaurant();
   const id = value(form, "id") || undefined;
   if (!membership.isOwner && !membership.permissions.has(id ? "menu.products.update" : "menu.products.create")) fail("FORBIDDEN");
+  await assertPlanFeature(membership.restaurantId, "digital_menu");
+  if (!id) await assertPlanLimit(membership.restaurantId, "products");
   const parsed = productSchema.safeParse({
     id, categoryId: value(form, "categoryId") || undefined, nameAr: value(form, "nameAr"), nameEn: value(form, "nameEn"), descriptionAr: value(form, "descriptionAr"), descriptionEn: value(form, "descriptionEn"), sku: value(form, "sku"), price: value(form, "price"), compareAtPrice: value(form, "compareAtPrice") || undefined, costPrice: value(form, "costPrice") || undefined, taxRate: value(form, "taxRate") || 0, imageUrl: value(form, "imageUrl"), calories: value(form, "calories") || undefined, prepMinutes: value(form, "prepMinutes") || 15, ingredients: value(form, "ingredients"), allergens: listValue(form, "allergens"), tags: listValue(form, "tags"), availability: value(form, "availability") || "ALWAYS", stockQty: value(form, "stockQty") || undefined, trackStock: bool(form, "trackStock"), isVisible: bool(form, "isVisible"), isFeatured: bool(form, "isFeatured"), sortOrder: value(form, "sortOrder") || 0, modifierGroupIds: json(form, "modifierGroupIds", []), extraIds: json(form, "extraIds", []),
   });
@@ -150,6 +156,7 @@ export async function saveProductAction(form: FormData) {
     if (id) {
       product = await tx.product.findFirst({ where: { id, restaurantId: membership.restaurantId, deletedAt: null } });
       if (!product) fail("NOT_FOUND");
+      if (!product.price.equals(data.price) && !membership.isOwner && !membership.permissions.has("menu.prices.update")) fail("FORBIDDEN");
       if (!product.price.equals(data.price)) await tx.priceHistory.create({ data: { productId: id, oldPrice: product.price, newPrice: data.price, changedById: membership.auth.user.id, reason: value(form, "priceReason") || "Menu product price update" } });
       await tx.product.update({ where: { id }, data });
     } else product = await tx.product.create({ data: { restaurantId: membership.restaurantId, ...data } });
@@ -253,7 +260,36 @@ export async function saveMenuThemeAction(form: FormData) {
 export async function resetMenuThemeAction() { const membership=await tenant("menu.themes.manage"); await db.restaurant.update({where:{id:membership.restaurantId},data:{primaryColor:"#059669",secondaryColor:"#0f172a",fontFamily:"IBM Plex Sans Arabic",menuLayout:"grid",menuTheme:{template:"classic",primaryColor:"#059669",secondaryColor:"#0f172a",fontFamily:"IBM Plex Sans Arabic",layout:"grid",cardStyle:"soft",imageSize:"medium",showCover:true,showLogo:true,showFooter:true,categoryStyle:"pills"}}}); refresh(); }
 
 export async function importProductsCsvAction(form: FormData) {
-  const membership=await tenant("menu.import"); const raw=form.get("file"); if(!(raw instanceof File) || raw.size>5*1024*1024) fail("INVALID_FILE"); const content=await raw.text(); const lines=content.split(/\r?\n/).filter(Boolean); if(lines.length<2) fail("EMPTY_FILE"); const headers=lines[0].split(",").map(x=>x.trim().toLowerCase()); const index=(name:string)=>headers.indexOf(name); const nameIndex=index("namear"); const priceIndex=index("price"); if(nameIndex<0||priceIndex<0) fail("CSV_HEADERS_REQUIRED"); let created=0; for(const line of lines.slice(1)){const cols=line.split(","); const name=cols[nameIndex]?.trim(); const price=Number(cols[priceIndex]); if(!name||!Number.isFinite(price)||price<0) continue; await db.product.create({data:{restaurantId:membership.restaurantId,nameAr:name,nameEn:cols[index("nameen")]?.trim()||null,descriptionAr:cols[index("descriptionar")]?.trim()||null,price:new Prisma.Decimal(price),isVisible:false,availability:"HIDDEN"}}); created++;} await logActivity({restaurantId:membership.restaurantId,actorId:membership.auth.user.id,action:"menu.products.imported",entity:"Product",description:`Imported ${created} products from CSV`}); refresh();
+  const membership = await tenant("menu.import");
+  const file = form.get("file");
+  if (!(file instanceof File) || file.size === 0 || file.size > 5 * 1024 * 1024) fail("INVALID_FILE");
+  const records = parseCsvRecords((await file.text()).replace(/^\uFEFF/, ""));
+  if (records.length < 2) fail("EMPTY_FILE");
+  const headers = records[0].map((header) => header.trim().toLowerCase());
+  const index = (name: string) => headers.indexOf(name);
+  const nameIndex = index("namear");
+  const priceIndex = index("price");
+  if (nameIndex < 0 || priceIndex < 0) fail("CSV_HEADERS_REQUIRED");
+  const rows = records.slice(1).map((columns) => {
+    const nameAr = (columns[nameIndex] ?? "").trim();
+    const rawPrice = (columns[priceIndex] ?? "").trim();
+    const price = Number(rawPrice);
+    if (!nameAr || !Number.isFinite(price) || price < 0 || price > 100000000) fail("INVALID_CSV_ROW");
+    return {
+      restaurantId: membership.restaurantId,
+      nameAr,
+      nameEn: (columns[index("nameen")] ?? "").trim() || null,
+      descriptionAr: (columns[index("descriptionar")] ?? "").trim() || null,
+      price: new Prisma.Decimal(price),
+      isVisible: false,
+      availability: "HIDDEN" as const,
+    };
+  });
+  if (!rows.length) fail("EMPTY_FILE");
+  await assertPlanLimit(membership.restaurantId, "products", rows.length);
+  await db.product.createMany({ data: rows });
+  await logActivity({ restaurantId: membership.restaurantId, actorId: membership.auth.user.id, action: "menu.products.imported", entity: "Product", description: `Imported ${rows.length} products from CSV` });
+  refresh();
 }
 
 

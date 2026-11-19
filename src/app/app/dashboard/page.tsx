@@ -40,6 +40,7 @@ export default async function DashboardPage() {
   const { t, locale } = await getI18n();
   const { restaurantId, restaurant } = membership;
   const currency = restaurant.currency;
+  const canViewFinancial = membership.isOwner || membership.permissions.has("reports.financial.view");
 
   const today = startOfDay();
   const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
@@ -134,29 +135,23 @@ export default async function DashboardPage() {
       />
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard
+        {canViewFinancial ? <StatCard
           label={locale === "ar" ? "مبيعات اليوم" : "Today's sales"}
           value={formatMoney(todaySales, currency, locale)}
           icon={<BadgeDollarSign />}
-          trend={{ value: 12.4 }}
-          hint={locale === "ar" ? "مقارنة بالأمس" : "vs yesterday"}
-        />
+        /> : null}
         <StatCard
           label={locale === "ar" ? "طلبات اليوم" : "Orders today"}
           value={formatNumber(todayOrders.length, locale)}
           icon={<ShoppingBag />}
           accent="sky"
-          trend={{ value: 8.1 }}
-          hint={locale === "ar" ? "مقارنة بالأمس" : "vs yesterday"}
         />
-        <StatCard
+        {canViewFinancial ? <StatCard
           label={locale === "ar" ? "متوسط قيمة الطلب" : "Average order value"}
           value={formatMoney(avgOrder, currency, locale)}
           icon={<ReceiptText />}
           accent="violet"
-          trend={{ value: 3.2 }}
-          hint={locale === "ar" ? "آخر 30 يوم" : "Last 30 days"}
-        />
+        /> : null}
         <StatCard
           label={locale === "ar" ? "الطاولات المشغولة" : "Occupied tables"}
           value={
@@ -183,15 +178,15 @@ export default async function DashboardPage() {
           icon={<ChefHat />}
           accent="amber"
         />
-        <StatCard
+        {canViewFinancial ? <StatCard
           label={locale === "ar" ? "مبيعات الشهر" : "Monthly sales"}
           value={formatMoney(monthSales, currency, locale)}
           icon={<ArrowUpRight />}
           accent="primary"
-        />
+        /> : null}
       </div>
 
-      <div className="mt-6 grid gap-4 lg:grid-cols-3">
+      {canViewFinancial ? <div className="mt-6 grid gap-4 lg:grid-cols-3">
         <div className="rounded-2xl border bg-card p-5 shadow-soft lg:col-span-2">
           <div className="mb-4 flex items-center justify-between">
             <div>
@@ -250,7 +245,7 @@ export default async function DashboardPage() {
             )}
           </div>
         </div>
-      </div>
+      </div> : null}
 
       <div className="mt-4 rounded-2xl border bg-card shadow-soft">
         <div className="flex items-center justify-between border-b p-5">
@@ -275,7 +270,7 @@ export default async function DashboardPage() {
               <TableHead>{t("common.order")}</TableHead>
               <TableHead>{t("common.table")}</TableHead>
               <TableHead>{t("common.type")}</TableHead>
-              <TableHead>{t("common.total")}</TableHead>
+              {canViewFinancial ? <TableHead>{t("common.total")}</TableHead> : null}
               <TableHead>{t("common.status")}</TableHead>
               <TableHead>{t("common.time")}</TableHead>
             </TableRow>
@@ -283,7 +278,7 @@ export default async function DashboardPage() {
           <TableBody>
             {recentOrders.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="py-10 text-center text-sm text-muted-foreground">
+                <TableCell colSpan={canViewFinancial ? 6 : 5} className="py-10 text-center text-sm text-muted-foreground">
                   {t("common.noData")}
                 </TableCell>
               </TableRow>
@@ -304,9 +299,7 @@ export default async function DashboardPage() {
                     <TableCell>
                       <Badge variant={type.variant}>{type.label}</Badge>
                     </TableCell>
-                    <TableCell className="font-semibold tabular">
-                      {formatMoney(order.total, order.currency, locale)}
-                    </TableCell>
+                    {canViewFinancial ? <TableCell className="font-semibold tabular">{formatMoney(order.total, order.currency, locale)}</TableCell> : null}
                     <TableCell>
                       <Badge variant={status.variant}>{status.label}</Badge>
                     </TableCell>

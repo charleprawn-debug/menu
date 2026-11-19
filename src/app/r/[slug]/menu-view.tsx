@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, type CSSProperties } from "react";
 import { Clock, MapPin, Phone, Search, Star, UtensilsCrossed } from "lucide-react";
 import { LocaleSwitcher } from "@/components/brand/locale-switcher";
 import { LogoMark } from "@/components/brand/logo";
@@ -44,13 +44,34 @@ interface MenuViewProps {
     currency: string;
     isOpen: boolean;
     todayHours: string | null;
-    theme: { layout?: string; footerText?: string };
+    theme: { primaryColor?: string; secondaryColor?: string; fontFamily?: string; layout?: string; cardStyle?: string; imageSize?: string; showCover?: boolean; showLogo?: boolean; showFooter?: boolean; footerText?: string; categoryStyle?: string };
   };
   categories: PublicCategory[];
 }
 
+function hexToHsl(hex: string, fallback: string) {
+  const value = /^#[0-9a-f]{6}$/i.test(hex) ? hex.slice(1) : fallback.slice(1);
+  const r = parseInt(value.slice(0, 2), 16) / 255;
+  const g = parseInt(value.slice(2, 4), 16) / 255;
+  const b = parseInt(value.slice(4, 6), 16) / 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  const delta = max - min;
+  let h = 0;
+  if (delta) h = max === r ? ((g - b) / delta) % 6 : max === g ? (b - r) / delta + 2 : (r - g) / delta + 4;
+  h = (h * 60 + 360) % 360;
+  const l = (max + min) / 2;
+  const saturation = delta === 0 ? 0 : delta / (1 - Math.abs(2 * l - 1));
+  return `${Math.round(h)} ${Math.round(saturation * 100)}% ${Math.round(l * 100)}%`;
+}
+
 export function MenuView({ locale, restaurant, categories }: MenuViewProps) {
   const ar = locale === "ar";
+  const fontFamily = ["IBM Plex Sans Arabic", "Plus Jakarta Sans", "Sora", "system-ui"].includes(restaurant.theme.fontFamily ?? "") ? restaurant.theme.fontFamily! : "IBM Plex Sans Arabic";
+  const primary = hexToHsl(restaurant.theme.primaryColor ?? "#059669", "#059669");
+  const secondary = hexToHsl(restaurant.theme.secondaryColor ?? "#0f172a", "#0f172a");
+  const themeStyle = { "--primary": primary, "--ring": primary, "--secondary": secondary, "--font-arabic": `"${fontFamily}", sans-serif`, "--font-sans": `"${fontFamily}", sans-serif` } as CSSProperties;
+  const imageSize = restaurant.theme.imageSize === "small" ? "size-20" : restaurant.theme.imageSize === "large" ? "size-28" : "size-24";
+  const cardClass = restaurant.theme.cardStyle === "flat" ? "rounded-lg border-0 shadow-none" : restaurant.theme.cardStyle === "bordered" ? "rounded-xl border-2 shadow-none" : restaurant.theme.cardStyle === "minimal" ? "rounded-none border-b shadow-none" : "rounded-2xl border shadow-soft";
   const [query, setQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState<string>("all");
   const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
@@ -80,14 +101,16 @@ export function MenuView({ locale, restaurant, categories }: MenuViewProps) {
   };
 
   return (
-    <div className="min-h-screen bg-[#fbfaf7] text-ink-900 dark:bg-background dark:text-foreground">
+    <div style={themeStyle} className="min-h-screen bg-[#fbfaf7] text-ink-900 dark:bg-background dark:text-foreground">
       {/* Cover */}
-      <div className="relative h-[300px] w-full overflow-hidden sm:h-[380px]">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={restaurant.coverUrl} alt={restaurant.name} className="size-full object-cover" />
-        <div className="absolute inset-0 bg-gradient-to-t from-ink-950/90 via-ink-950/45 to-ink-950/10" />
-        <div className="absolute inset-x-0 top-0 flex items-center justify-between p-4 sm:p-6">
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1.5 text-xs font-semibold text-white backdrop-blur">
+      <div className={cn("relative w-full overflow-hidden", restaurant.theme.showCover === false ? "min-h-[150px]" : "h-[300px] sm:h-[380px]")}>
+        {restaurant.theme.showCover !== false ? <>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={restaurant.coverUrl} alt={restaurant.name} className="size-full object-cover" />
+          <div className="absolute inset-0 bg-gradient-to-t from-ink-950/90 via-ink-950/45 to-ink-950/10" />
+        </> : <div className="absolute inset-0 bg-card" />}
+        <div className={cn("absolute inset-x-0 top-0 flex items-center justify-between p-4 sm:p-6", restaurant.theme.showCover === false ? "text-foreground" : "text-white")}>
+          <span className={cn("inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold backdrop-blur", restaurant.theme.showCover === false ? "bg-muted text-foreground" : "bg-white/15 text-white")}>
             <LogoMark size={16} />
             DineFlow
           </span>
@@ -95,10 +118,10 @@ export function MenuView({ locale, restaurant, categories }: MenuViewProps) {
             <LocaleSwitcher compact />
           </div>
         </div>
-        <div className="absolute inset-x-0 bottom-0 p-5 text-white sm:p-8">
+        <div className={cn("absolute inset-x-0 bottom-0 p-5 sm:p-8", restaurant.theme.showCover === false ? "text-foreground" : "text-white")}>
           <div className="mx-auto max-w-4xl">
             <div className="mb-2.5 flex items-center gap-2.5">
-              {restaurant.logoUrl ? (
+              {restaurant.theme.showLogo === false ? null : restaurant.logoUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={restaurant.logoUrl} alt="" className="size-11 shrink-0 rounded-xl border-2 border-white/30 object-cover" />
               ) : (
@@ -110,13 +133,10 @@ export function MenuView({ locale, restaurant, categories }: MenuViewProps) {
                 <span className="size-1.5 rounded-full bg-white" />
                 {restaurant.isOpen ? (ar ? "مفتوح الآن" : "Open now") : ar ? "مغلق حالياً" : "Closed"}
               </Badge>
-              <span className="inline-flex items-center gap-1 rounded-full bg-white/15 px-2 py-1 text-[10px] font-semibold text-amber-300 backdrop-blur">
-                <Star className="size-3 fill-current" /> 4.8
-              </span>
             </div>
             <h1 className="text-2xl font-extrabold leading-tight sm:text-4xl">{restaurant.name}</h1>
-            <p className="mt-1.5 max-w-xl text-xs leading-relaxed text-white/75 sm:text-sm">{restaurant.description}</p>
-            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-white/80">
+            <p className={cn("mt-1.5 max-w-xl text-xs leading-relaxed sm:text-sm", restaurant.theme.showCover === false ? "text-muted-foreground" : "text-white/75")}>{restaurant.description}</p>
+            <div className={cn("mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs", restaurant.theme.showCover === false ? "text-muted-foreground" : "text-white/80")}>
               {restaurant.cuisineType ? (
                 <span className="inline-flex items-center gap-1">
                   <UtensilsCrossed className="size-3.5" /> {restaurant.cuisineType}
@@ -132,9 +152,7 @@ export function MenuView({ locale, restaurant, categories }: MenuViewProps) {
                   <Clock className="size-3.5" /> {restaurant.todayHours}
                 </span>
               ) : null}
-              <span className="inline-flex items-center gap-1 text-amber-300">
-                <Star className="size-3.5 fill-current" /> 4.8 · {totalProducts} {ar ? "صنف" : "items"}
-              </span>
+              <span>{totalProducts} {ar ? "صنف" : "items"}</span>
             </div>
           </div>
         </div>
@@ -156,7 +174,8 @@ export function MenuView({ locale, restaurant, categories }: MenuViewProps) {
             <button
               onClick={() => scrollTo("all")}
               className={cn(
-                "whitespace-nowrap rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors",
+                "whitespace-nowrap px-3.5 py-1.5 text-xs font-semibold transition-colors",
+                restaurant.theme.categoryStyle === "underline" ? "rounded-none border-b-2" : "rounded-full",
                 activeCategory === "all" ? "bg-primary text-white" : "bg-card text-muted-foreground hover:bg-muted"
               )}
             >
@@ -167,7 +186,8 @@ export function MenuView({ locale, restaurant, categories }: MenuViewProps) {
                 key={category.id}
                 onClick={() => scrollTo(category.id)}
                 className={cn(
-                  "whitespace-nowrap rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors",
+                  "whitespace-nowrap px-3.5 py-1.5 text-xs font-semibold transition-colors",
+                  restaurant.theme.categoryStyle === "underline" ? "rounded-none border-b-2" : "rounded-full",
                   activeCategory === category.id ? "bg-primary text-white" : "bg-card text-muted-foreground hover:bg-muted"
                 )}
               >
@@ -233,13 +253,13 @@ export function MenuView({ locale, restaurant, categories }: MenuViewProps) {
                   {category.products.length} {ar ? "صنف" : "items"}
                 </span>
               </div>
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className={cn("grid gap-3", restaurant.theme.layout === "list" ? "grid-cols-1" : "sm:grid-cols-2")}>
                 {category.products.map((product) => (
                   <article
                     key={product.id}
-                    className="group flex gap-3 rounded-2xl border bg-card p-2.5 shadow-soft transition-all hover:border-primary/25 hover:shadow-card"
+                    className={cn("group flex gap-3 bg-card p-2.5 transition-all hover:border-primary/25", cardClass, restaurant.theme.cardStyle === "filled" ? "bg-secondary/40" : "", "hover:shadow-card")}
                   >
-                    <div className="relative size-24 shrink-0 overflow-hidden rounded-xl bg-muted">
+                    <div className={cn("relative shrink-0 overflow-hidden rounded-xl bg-muted", imageSize)}>
                       {product.imageUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img src={product.imageUrl} alt={product.name} className="size-full object-cover transition-transform duration-300 group-hover:scale-105" />
@@ -301,15 +321,15 @@ export function MenuView({ locale, restaurant, categories }: MenuViewProps) {
               <MapPin className="size-3.5" /> {restaurant.address}
             </p>
           ) : null}
-          <p className="text-[11px] text-muted-foreground">{restaurant.theme.footerText ?? (ar ? "شكراً لزيارتكم" : "Thank you for visiting")}</p>
+          {restaurant.theme.showFooter !== false ? <p className="text-[11px] text-muted-foreground">{restaurant.theme.footerText ?? (ar ? "شكراً لزيارتكم" : "Thank you for visiting")}</p> : null}
         </div>
       </main>
 
-      <footer className="border-t bg-card py-6 text-center">
+      {restaurant.theme.showFooter !== false ? <footer className="border-t bg-card py-6 text-center">
         <p className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
           {ar ? "مدعوم بواسطة" : "Powered by"} <span className="font-bold text-foreground">DineFlow</span>
         </p>
-      </footer>
+      </footer> : null}
     </div>
   );
 }
