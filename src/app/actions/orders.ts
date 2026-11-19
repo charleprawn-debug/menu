@@ -1,4 +1,5 @@
 "use server";
+import { randomBytes } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { Prisma, type PaymentMethod } from "@prisma/client";
 import { z } from "zod";
@@ -6,10 +7,11 @@ import { db } from "@/lib/db";
 import { requireRestaurant } from "@/lib/auth/context";
 import { logActivity } from "@/lib/audit";
 import { assertPlanFeature, assertPlanLimit } from "@/lib/services/subscription";
+import { ensureKitchenTickets } from "@/lib/services/kitchen";
 const value=(f:FormData,k:string)=>{const v=f.get(k);return typeof v==="string"?v:""};
 const bool=(f:FormData,k:string)=>["on","true","1"].includes(value(f,k));
 const fail=(x:string):never=>{throw new Error(x)};
-const refresh=()=>{revalidatePath("/app/orders","layout");revalidatePath("/app/orders");revalidatePath("/app/tables","layout")};
+const refresh=()=>{revalidatePath("/app/orders","layout");revalidatePath("/app/orders");revalidatePath("/app/tables","layout");revalidatePath("/kitchen");revalidatePath("/waiter");revalidatePath("/pos")};
 async function tenant(p:string){const m=await requireRestaurant();if(!m.isOwner&&!m.permissions.has(p))fail("FORBIDDEN");await assertPlanFeature(m.restaurantId,"order_management");return m}
 const status=z.enum(["NEW","ACCEPTED","PREPARING","READY","DELIVERED","COMPLETED","REJECTED","CANCELLED"]);
 const transitions:Record<string,string[]>={NEW:["ACCEPTED","REJECTED","CANCELLED"],ACCEPTED:["PREPARING","REJECTED","CANCELLED"],PREPARING:["READY","CANCELLED"],READY:["DELIVERED","CANCELLED"],DELIVERED:["COMPLETED"],COMPLETED:[],REJECTED:[],CANCELLED:[]};
@@ -33,6 +35,16 @@ async function change(id:string,next:string,note:string,permission:string){
     const changed=await tx.order!.updateMany({where:{id,restaurantId:m.restaurantId,status:order!.status},data});
     if(changed.count!==1)fail("ORDER_CHANGED");
     await tx.orderStatusHistory.create({data:{orderId:id,fromStatus:order!.status,toStatus:parsed.data!,note:note||null,changedById:m.auth.user.id}});
+    if((parsed.data==="CANCELLED"||parsed.data==="REJECTED")&&order!.sessionId){await tx.tableSession.updateMany({where:{id:order!.sessionId,restaurantId:m.restaurantId,status:"OPEN"},data:{total:{decrement:order!.total}}});}
+    if(parsed.data==="CANCELLED"||parsed.data==="REJECTED"){
+      const activeTickets=await tx.kitchenTicket.findMany({where:{orderId:id,order:{restaurantId:m.restaurantId},status:{notIn:["SERVED","CANCELLED"]}},select:{id:true}});
+      for(const ticket of activeTickets){
+        await tx.kitchenTicketItem.updateMany({where:{ticketId:ticket.id,status:{notIn:["SERVED","CANCELLED"]}},data:{status:"CANCELLED"}});
+        const changedTicket=await tx.kitchenTicket.updateMany({where:{id:ticket.id,order:{restaurantId:m.restaurantId},status:{notIn:["SERVED","CANCELLED"]}},data:{status:"CANCELLED",note:note||parsed.data}});
+        if(changedTicket.count) await tx.kitchenStatusHistory.create({data:{ticketId:ticket.id,status:"CANCELLED",changedById:m.auth.user.id}});
+      }
+      await tx.orderItem.updateMany({where:{orderId:id,order:{restaurantId:m.restaurantId},status:{notIn:["SERVED","CANCELLED"]}},data:{status:"CANCELLED"}});
+    }
   },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
   await logActivity({restaurantId:m.restaurantId,actorId:m.auth.user.id,action:`orders.status.${parsed.data!.toLowerCase()}`,entity:"Order",entityId:id,newValue:{status:parsed.data!,note}});
   refresh();
@@ -48,6 +60,8 @@ export async function createManualOrderAction(f:FormData){
   const m=await tenant("orders.create");
   const parsed=z.object({
     type:z.enum(["DINE_IN","PICKUP","DELIVERY"]),
+    draftId:z.string().max(100).optional(),
+    customerId:z.string().max(100).optional(),
     tableId:z.string().optional(),
     customerName:z.string().trim().max(120).optional(),
     customerPhone:z.string().trim().max(40).optional(),
@@ -56,11 +70,14 @@ export async function createManualOrderAction(f:FormData){
     discount:z.string().trim().regex(/^\d{1,9}(?:\.\d{1,2})?$/).default("0"),
     items:z.string().min(2).max(100000),
   }).safeParse({
-    type:value(f,"type"),tableId:value(f,"tableId")||undefined,customerName:value(f,"customerName"),customerPhone:value(f,"customerPhone"),notes:value(f,"notes"),
+    type:value(f,"type"),draftId:value(f,"draftId")||undefined,customerId:value(f,"customerId")||undefined,tableId:value(f,"tableId")||undefined,customerName:value(f,"customerName"),customerPhone:value(f,"customerPhone"),notes:value(f,"notes"),
     paymentMethod:value(f,"paymentMethod")||undefined,discount:value(f,"discount")||"0",items:value(f,"items"),
   });
   if(!parsed.success) fail("INVALID_ORDER");
   const data=parsed.data!;
+  const existingDraft=data.draftId?await db.order!.findFirst({where:{id:data.draftId,restaurantId:m.restaurantId,source:"DRAFT"},include:{invoice:true,payments:true}}):null;
+  if(data.draftId&&!existingDraft) fail("DRAFT_NOT_FOUND");
+  if(existingDraft&&(existingDraft!.invoice||existingDraft!.payments.length)) fail("DRAFT_ALREADY_FINALIZED");
   const submittedCoupon=value(f,"couponCode").trim();
   if((new Prisma.Decimal(data.discount).gt(0)||submittedCoupon!=="")&&!m.isOwner&&!m.permissions.has("orders.discount")) fail("FORBIDDEN");
   let rawItems:unknown;
@@ -124,33 +141,47 @@ export async function createManualOrderAction(f:FormData){
   }
   const total=basketTotal.minus(discount).toDecimalPlaces(2,Prisma.Decimal.ROUND_HALF_UP);
   if(total.gt("9999999999.99")) fail("ORDER_TOTAL_TOO_LARGE");
+  const preserveDraftCustomer=value(f,"preserveDraftCustomer")==="1"&&Boolean(existingDraft);
+  const customerId=data.customerId||(preserveDraftCustomer?existingDraft!.customerId??undefined:undefined);
+  const customer=customerId?await db.customer.findFirst({where:{id:customerId,restaurantId:m.restaurantId},select:{id:true,name:true,phone:true}}):null;
+  if(customerId&&!customer) fail("CUSTOMER_NOT_FOUND");
   const table=data.tableId?await db.table!.findFirst({where:{id:data.tableId,restaurantId:m.restaurantId,isActive:true}}):null;
   if(data.type==="DINE_IN"&&!table) fail("TABLE_REQUIRED");
   const session=table?await db.tableSession.findFirst({where:{tableId:table!.id,restaurantId:m.restaurantId,status:"OPEN"}}):null;
   const settings=await db.restaurant.findFirst({where:{id:m.restaurantId},select:{orderSettings:true}});
   const orderSettings=(settings?.orderSettings&&typeof settings.orderSettings==="object"&&!Array.isArray(settings.orderSettings)?settings.orderSettings as Record<string,unknown>:{});
   await applyOrderSettingsGuards(m.restaurantId,Number(subtotal),Number(total),orderSettings);
-  await assertPlanLimit(m.restaurantId,"ordersPerMonth");
   const submitMode=value(f,"submitMode");
+  if(!existingDraft||submitMode!=="draft") await assertPlanLimit(m.restaurantId,"ordersPerMonth");
   if(submitMode!==""&&submitMode!=="draft"&&submitMode!=="send"&&submitMode!=="confirm") fail("INVALID_SUBMIT_MODE");
   const status=submitMode==="draft"?"NEW":submitMode==="send"?"PREPARING":orderSettings.autoAccept===true?"ACCEPTED":"NEW";
   const order=await db.$transaction(async tx=>{
-    const latest=await tx.order!.findFirst({where:{restaurantId:m.restaurantId},orderBy:{orderNumber:"desc"},select:{orderNumber:true}});
-    const created=await tx.order!.create({data:{restaurantId:m.restaurantId,orderNumber:(latest?.orderNumber??0)+1,type:data.type,status:status as "NEW"|"ACCEPTED"|"PREPARING",tableId:table?.id??null,sessionId:session?.id??null,customerName:data.customerName||null,customerPhone:data.customerPhone||null,subtotal,discount,tax,total,currency:m.restaurant.currency,notes:data.notes||null,paymentMethod:data.paymentMethod as PaymentMethod|undefined,paymentStatus:"UNPAID",source:submitMode==="draft"?"DRAFT":"MANUAL",couponId,couponCode:couponCode||null,createdById:m.auth.user.id,itemsCount:items.reduce((sum,item)=>sum+item.quantity,0)}});
-    for(const snapshot of snapshots){
-      await tx.orderItem.create({data:{orderId:created.id,productId:snapshot.product.id,nameSnapshot:snapshot.product.nameAr,imageSnapshot:snapshot.product.imageUrl,unitPrice:snapshot.product.price,quantity:snapshot.item.quantity,modifiersTotal:snapshot.modifierTotal,lineTotal:snapshot.lineTotal,taxRate:snapshot.product.taxRate,notes:snapshot.item.notes||null,modifiers:{create:snapshot.modifiers.map(modifier=>({optionId:modifier.optionId,groupName:modifier.groupName,name:modifier.name,priceDelta:modifier.priceDelta}))}}});
+    const latest=existingDraft?null:await tx.order!.findFirst({where:{restaurantId:m.restaurantId},orderBy:{orderNumber:"desc"},select:{orderNumber:true}});
+    let sessionId=submitMode==="draft"?null:session?.id??null;
+    if(table&&submitMode!=="draft"){
+      const openSession=await tx.tableSession.findFirst({where:{restaurantId:m.restaurantId,tableId:table.id,status:"OPEN"},select:{id:true}});
+      if(openSession) sessionId=openSession.id;
+      else { const opened=await tx.tableSession.create({data:{restaurantId:m.restaurantId,tableId:table.id,code:randomBytes(18).toString("base64url"),openedById:m.auth.user.id}}); sessionId=opened.id; }
     }
-    await tx.orderStatusHistory.create({data:{orderId:created.id,toStatus:created.status,changedById:m.auth.user.id}});
-    if(couponId){
+    const orderData={type:data.type,status:status as "NEW"|"ACCEPTED"|"PREPARING",tableId:table?.id??null,sessionId,customerId:customer?.id??null,customerName:preserveDraftCustomer?existingDraft!.customerName:data.customerName||customer?.name||null,customerPhone:preserveDraftCustomer?existingDraft!.customerPhone:data.customerPhone||customer?.phone||null,subtotal,discount,tax,total,currency:m.restaurant.currency,notes:data.notes||null,paymentMethod:data.paymentMethod as PaymentMethod|undefined,paymentStatus:"UNPAID" as const,source:submitMode==="draft"?"DRAFT":"MANUAL",couponId,couponCode:couponCode||null,createdById:m.auth.user.id,itemsCount:items.reduce((sum,item)=>sum+item.quantity,0)};
+    const saved=existingDraft?await tx.order!.update({where:{id:existingDraft!.id},data:orderData}):await tx.order!.create({data:{restaurantId:m.restaurantId,orderNumber:(latest?.orderNumber??0)+1,...orderData}});
+    if(existingDraft) await tx.orderItem.deleteMany({where:{orderId:saved.id}});
+    for(const snapshot of snapshots){
+      await tx.orderItem.create({data:{orderId:saved.id,productId:snapshot.product.id,stationId:snapshot.product.defaultStationId,nameSnapshot:snapshot.product.nameAr,imageSnapshot:snapshot.product.imageUrl,unitPrice:snapshot.product.price,quantity:snapshot.item.quantity,modifiersTotal:snapshot.modifierTotal,lineTotal:snapshot.lineTotal,taxRate:snapshot.product.taxRate,notes:snapshot.item.notes||null,modifiers:{create:snapshot.modifiers.map(modifier=>({optionId:modifier.optionId,groupName:modifier.groupName,name:modifier.name,priceDelta:modifier.priceDelta}))}}});
+    }
+    if(!existingDraft||existingDraft!.status!==saved.status) await tx.orderStatusHistory.create({data:{orderId:saved.id,fromStatus:existingDraft?.status??null,toStatus:saved.status,changedById:m.auth.user.id,note:existingDraft?"Draft submitted":"Manual order created"}});
+    if(couponId&&submitMode!=="draft"){
       const coupon=await tx.coupon.findFirst({where:{id:couponId,restaurantId:m.restaurantId,isActive:true}});
       if(!coupon||coupon.maxUses!==null&&coupon.usedCount>=coupon.maxUses) fail("COUPON_LIMIT_REACHED");
       await tx.coupon.update({where:{id:couponId},data:{usedCount:{increment:1}}});
-      await tx.couponUsage.create({data:{couponId,orderId:created.id,amount:discount}});
+      await tx.couponUsage.create({data:{couponId,orderId:saved.id,amount:discount}});
     }
-    if(table) await tx.table!.update({where:{id:table!.id},data:{status:"OCCUPIED"}});
-    return created;
+    if(table&&submitMode!=="draft") await tx.table!.update({where:{id:table!.id},data:{status:"OCCUPIED"}});
+    if(sessionId&&submitMode!=="draft") await tx.tableSession.updateMany({where:{id:sessionId,restaurantId:m.restaurantId,status:"OPEN"},data:{total:{increment:total}}});
+    if(submitMode!=="draft") await ensureKitchenTickets(tx,m.restaurantId,saved.id);
+    return saved;
   },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
-  await logActivity({restaurantId:m.restaurantId,actorId:m.auth.user.id,action:"orders.manual.created",entity:"Order",entityId:order.id,newValue:{orderNumber:order.orderNumber,total:total.toFixed(2),currency:m.restaurant.currency}});
+  await logActivity({restaurantId:m.restaurantId,actorId:m.auth.user.id,action:submitMode==="draft"?"orders.draft.saved":"orders.manual.created",entity:"Order",entityId:order.id,newValue:{orderNumber:order.orderNumber,total:total.toFixed(2),currency:m.restaurant.currency}});
   refresh();
 }
 export async function saveOrderSettingsAction(f:FormData){const m=await tenant("settings.manage");const settings={requireApproval:bool(f,"requireApproval"),autoAccept:bool(f,"autoAccept"),minOrder:Number(value(f,"minOrder"))||0,maxOrder:Number(value(f,"maxOrder"))||999999,acceptWhenClosed:bool(f,"acceptWhenClosed"),defaultPrepMinutes:Number(value(f,"defaultPrepMinutes"))||15,allowCustomerEdit:bool(f,"allowCustomerEdit"),allowCustomerCancel:bool(f,"allowCustomerCancel"),maxConcurrent:Number(value(f,"maxConcurrent"))||50,openTime:value(f,"openTime")||"00:00",closeTime:value(f,"closeTime")||"23:59"};if(settings.minOrder>settings.maxOrder)fail("INVALID_ORDER_LIMITS");await db.restaurant.update({where:{id:m.restaurantId},data:{orderSettings:settings}});refresh()}

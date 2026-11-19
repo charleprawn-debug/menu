@@ -333,7 +333,7 @@ export const faqs: { category: Localized; question: Localized; answer: Localized
   {
     category: { ar: "البدء", en: "Getting started" },
     question: { ar: "هل أحتاج إلى أجهزة خاصة؟", en: "Do I need special hardware?" },
-    answer: { ar: "يمكن تصفح المنيو وإكمال الإعداد الأولي عبر متصفح حديث. تجهيزات المطبخ أو نقطة البيع تتعلق بميزات تشغيلية ستُبنى في مراحل لاحقة.", en: "The public menu and initial setup work in a modern browser. Kitchen or POS equipment depends on operational features that will be built in later phases." },
+    answer: { ar: "تعمل واجهات الطلبات والمطبخ والنادل ونقطة البيع عبر متصفح حديث. ويمكن طباعة التذكرة أو الفاتورة من المتصفح إلى طابعة متوافقة عند الحاجة؛ لا يلزم جهاز POS خاص.", en: "Order, kitchen, waiter and POS workspaces run in a modern browser. Tickets and invoices can be printed from the browser to a compatible printer; dedicated POS hardware is not required." },
   },
   {
     category: { ar: "المنيو والطلبات", en: "Menu & orders" },
@@ -348,7 +348,7 @@ export const faqs: { category: Localized; question: Localized; answer: Localized
   {
     category: { ar: "المنيو والطلبات", en: "Menu & orders" },
     question: { ar: "هل يدعم النظام الطلبات الداخلية والاستلام والتوصيل؟", en: "Does it support dine-in, pickup and delivery orders?" },
-    answer: { ar: "أنواع الطلب موجودة في بنية البيانات، لكن استقبال الطلبات ومعالجتها غير متاحين بعد؛ مسار الطلب التشغيلي مخطط لخطوة 6 وطلبات الضيوف لخطوة 11.", en: "Order types exist in the data model, but order submission and processing are not available yet; operational order flow is planned for step 6 and guest ordering for step 11." },
+    answer: { ar: "يمكن للفريق إنشاء ومعالجة الطلبات الداخلية والاستلام والتوصيل من واجهات التشغيل بحسب الصلاحيات. أما طلب الضيف مباشرة من QR العام فليس متاحاً بعد؛ المنيو العام الحالي للتصفح فقط.", en: "Staff can create and process dine-in, pickup and delivery orders in the operational workspaces, subject to permissions. Guest ordering directly from the public QR menu is not available yet; the current public menu is browse-only." },
   },
   {
     category: { ar: "المنيو والطلبات", en: "Menu & orders" },
@@ -358,7 +358,7 @@ export const faqs: { category: Localized; question: Localized; answer: Localized
   {
     category: { ar: "المنيو والطلبات", en: "Menu & orders" },
     question: { ar: "هل تصل الطلبات إلى المطبخ؟", en: "Do orders reach the kitchen?" },
-    answer: { ar: "ليس بعد. شاشة المطبخ التفاعلية مخططة لخطوة 7 بعد استكمال مسارات الطلبات.", en: "Not yet. The interactive kitchen display is planned for step 7 after the order workflows are built." },
+    answer: { ar: "نعم. تُوجّه الطلبات التي تنشئها فرق المطعم إلى تذاكر محطات التحضير، مع شاشة لمتابعة الأصناف والتأجيل والجاهزية. يستطيع POS عرض طلبات QR الموجودة في قائمة الطلبات أيضاً، لكن إرسال طلب ضيف من QR العام سيأتي في مرحلته اللاحقة.", en: "Yes. Orders created by restaurant staff are routed to prep-station tickets, with a display to track items, delays and readiness. POS also shows existing QR-sourced orders in the shared queue, while guest submission from the public QR menu remains a later phase." },
   },
   {
     category: { ar: "الخطط والأسعار", en: "Plans & pricing" },

@@ -178,6 +178,7 @@ enum KitchenStationType {
 enum KitchenTicketStatus {
   QUEUED
   PREPARING
+  DELAYED
   READY
   SERVED
   CANCELLED
@@ -641,6 +642,7 @@ model Product {
   id             String              @id @default(cuid())
   restaurantId   String
   categoryId     String?
+  defaultStationId String?            @map("default_station_id")
   nameAr         String
   nameEn         String?
   descriptionAr  String?             @db.Text
@@ -670,6 +672,7 @@ model Product {
 
   restaurant     Restaurant            @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
   category       MenuCategory?         @relation(fields: [categoryId], references: [id])
+  defaultStation KitchenStation?       @relation("ProductDefaultStation", fields: [defaultStationId], references: [id], onDelete: SetNull)
   images         ProductImage[]
   modifierGroups ProductModifierGroup[]
   extras         ProductExtra[]
@@ -679,6 +682,7 @@ model Product {
 
   @@index([restaurantId])
   @@index([categoryId])
+  @@index([defaultStationId])
   @@map("products")
 }
 
@@ -1098,6 +1102,7 @@ model KitchenStation {
 
   restaurant Restaurant      @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
   tickets    KitchenTicket[]
+  products   Product[]        @relation("ProductDefaultStation")
 
   @@index([restaurantId])
   @@map("kitchen_stations")
@@ -1122,6 +1127,7 @@ model KitchenTicket {
 
   @@index([orderId])
   @@index([status])
+  @@unique([orderId, stationId])
   @@map("kitchen_tickets")
 }
 
