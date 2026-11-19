@@ -17,6 +17,8 @@ import {
 } from "lucide-react";
 import { db } from "@/lib/db";
 import { requireRestaurant } from "@/lib/auth/context";
+import { Prisma } from "@prisma/client";
+import { branchScopeWhere, branchScopesWhere, ownedOrderWhere } from "@/lib/auth/scope";
 import { getI18n } from "@/i18n";
 import { formatMoney, formatNumber, toNumber } from "@/lib/money";
 import { formatTime } from "@/lib/utils";
@@ -41,6 +43,18 @@ export default async function DashboardPage() {
   const { restaurantId, restaurant } = membership;
   const currency = restaurant.currency;
   const canViewFinancial = membership.isOwner || membership.permissions.has("reports.financial.view");
+  const scopedPermissions = canViewFinancial ? ["orders.view", "reports.financial.view"] : ["orders.view"];
+  const ownedPermission = scopedPermissions.find((permission) => membership.permissionScopes.get(permission) === "OWNED");
+  const orderScope: Prisma.OrderWhereInput = {
+    ...branchScopesWhere(membership, scopedPermissions, "branchId"),
+    ...(ownedPermission ? ownedOrderWhere(membership, ownedPermission) : {}),
+  };
+  const dashboardOrderWhere: Prisma.OrderWhereInput = { restaurantId, ...orderScope };
+  const tablesWhere: Prisma.TableWhereInput = {
+    restaurantId,
+    isActive: true,
+    ...branchScopeWhere(membership, "tables.view", "branchId"),
+  };
 
   const today = startOfDay();
   const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
@@ -48,27 +62,29 @@ export default async function DashboardPage() {
 
   const [todayOrders, monthOrders, tables, weekOrders, recentOrders, topItems] = await Promise.all([
     db.order.findMany({
-      where: { restaurantId, createdAt: { gte: today } },
+      where: { ...dashboardOrderWhere, createdAt: { gte: today } },
       select: { id: true, total: true, status: true, itemsCount: true },
     }),
     db.order.findMany({
-      where: { restaurantId, createdAt: { gte: monthStart }, status: { notIn: ["CANCELLED", "REJECTED"] } },
+      where: { ...dashboardOrderWhere, createdAt: { gte: monthStart }, status: { notIn: ["CANCELLED", "REJECTED"] } },
       select: { total: true },
     }),
-    db.table.findMany({ where: { restaurantId, isActive: true }, select: { status: true } }),
+    membership.isOwner || membership.permissions.has("tables.view")
+      ? db.table.findMany({ where: tablesWhere, select: { status: true } })
+      : Promise.resolve([]),
     db.order.findMany({
-      where: { restaurantId, createdAt: { gte: weekStart }, status: { notIn: ["CANCELLED", "REJECTED"] } },
+      where: { ...dashboardOrderWhere, createdAt: { gte: weekStart }, status: { notIn: ["CANCELLED", "REJECTED"] } },
       select: { total: true, createdAt: true },
     }),
     db.order.findMany({
-      where: { restaurantId },
+      where: dashboardOrderWhere,
       include: { table: { select: { number: true, name: true } } },
       orderBy: { createdAt: "desc" },
       take: 7,
     }),
     db.orderItem.groupBy({
       by: ["productId"],
-      where: { order: { restaurantId, status: { notIn: ["CANCELLED", "REJECTED"] } }, productId: { not: null } },
+      where: { order: { ...dashboardOrderWhere, status: { notIn: ["CANCELLED", "REJECTED"] } }, productId: { not: null } },
       _sum: { quantity: true, lineTotal: true },
       orderBy: { _sum: { quantity: "desc" } },
       take: 5,

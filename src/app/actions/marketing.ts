@@ -4,6 +4,7 @@ import { createHmac } from "crypto";
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { requirePlatformAdmin } from "@/lib/auth/context";
+import { logPlatformAudit } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { getLocale } from "@/i18n";
 import { marketingInquirySchema } from "@/lib/validations/marketing";
@@ -111,9 +112,15 @@ export async function submitMarketingInquiry(
 }
 
 export async function markInquiryReviewed(formData: FormData): Promise<void> {
-  await requirePlatformAdmin();
+  const platform = await requirePlatformAdmin(["support.manage", "marketing.manage"]);
   const id = formData.get("id");
   if (typeof id !== "string" || id.length < 1 || id.length > 100) return;
-  await db.marketingInquiry.update({ where: { id }, data: { status: "REVIEWED" } });
+  const inquiry = await db.marketingInquiry.findUnique({ where: { id }, select: { id: true, subject: true, status: true } });
+  if (!inquiry || inquiry.status !== "NEW") return;
+  const capability = inquiry.subject === "support" ? "support.manage" : "marketing.manage";
+  if (!platform.platformCapabilities.has(capability)) throw new Error("FORBIDDEN");
+  const changed = await db.marketingInquiry.updateMany({ where: { id, subject: inquiry.subject, status: "NEW" }, data: { status: "REVIEWED" } });
+  if (!changed.count) return;
+  await logPlatformAudit({ actorId: platform.user.id, action: "platform.inquiry.reviewed", entity: "MarketingInquiry", entityId: id, meta: { subject: inquiry.subject, oldValue: { status: inquiry.status }, newValue: { status: "REVIEWED" } } });
   revalidatePath("/admin/inquiries");
 }

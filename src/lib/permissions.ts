@@ -253,10 +253,7 @@ export const ROLE_TEMPLATES: RoleTemplate[] = [
     permissions: [
       ...operational,
       "orders.cancel",
-      "menu.categories.manage",
-      "menu.products.update",
       "tables.qr.manage",
-      "tables.floorplan.manage",
       "staff.invite",
       "staff.update",
       "staff.activity.view",
@@ -463,22 +460,54 @@ export function permissionLabel(key: string, locale = "ar"): string {
   return locale === "ar" ? perm.ar : perm.en;
 }
 
+export type PermissionScope = "RESTAURANT" | "BRANCH" | "OWNED";
+
 export interface EffectivePermissionSource {
-  roles: { role: { permissions: { permission: { key: string } }[] } }[];
-  permissions: { effect: "ALLOW" | "DENY"; permission: { key: string } }[];
+  roles: { role: { permissions: { permission: { key: string }; scope?: PermissionScope }[] } }[];
+  permissions: {
+    effect: "ALLOW" | "DENY";
+    permission: { key: string };
+    scope?: PermissionScope;
+  }[];
 }
 
-/** Compute the effective permission set for a membership. */
-export function effectivePermissions(member: EffectivePermissionSource): Set<string> {
-  const set = new Set<string>();
+export interface EffectiveAuthorization {
+  permissions: Set<string>;
+  scopes: Map<string, PermissionScope>;
+}
+
+const scopeRank: Record<PermissionScope, number> = { RESTAURANT: 0, BRANCH: 1, OWNED: 2 };
+
+/** Compute effective permission grants and the narrowest scope granted by any role. */
+export function effectiveAuthorization(member: EffectivePermissionSource): EffectiveAuthorization {
+  const permissions = new Set<string>();
+  const scopes = new Map<string, PermissionScope>();
+  const grant = (key: string, scope: PermissionScope) => {
+    permissions.add(key);
+    const current = scopes.get(key);
+    if (!current || scopeRank[scope] < scopeRank[current]) scopes.set(key, scope);
+  };
+
   for (const memberRole of member.roles) {
-    for (const rp of memberRole.role.permissions) {
-      set.add(rp.permission.key);
+    for (const rolePermission of memberRole.role.permissions) {
+      grant(rolePermission.permission.key, rolePermission.scope ?? "RESTAURANT");
     }
   }
+
   for (const override of member.permissions) {
-    if (override.effect === "DENY") set.delete(override.permission.key);
-    else set.add(override.permission.key);
+    const key = override.permission.key;
+    if (override.effect === "DENY") {
+      permissions.delete(key);
+      scopes.delete(key);
+    } else {
+      grant(key, override.scope ?? "RESTAURANT");
+    }
   }
-  return set;
+
+  return { permissions, scopes };
+}
+
+/** Backwards-compatible permission set for existing call sites. */
+export function effectivePermissions(member: EffectivePermissionSource): Set<string> {
+  return effectiveAuthorization(member).permissions;
 }

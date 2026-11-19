@@ -1,9 +1,11 @@
 import "server-only";
 import { headers } from "next/headers";
 import { db } from "@/lib/db";
+import { safeAuditValue } from "@/lib/audit-sanitize";
 
 interface ActivityInput {
   restaurantId?: string | null;
+  branchId?: string | null;
   actorId?: string | null;
   action: string;
   entity: string;
@@ -20,13 +22,14 @@ export async function logActivity(input: ActivityInput): Promise<void> {
     await db.staffActivityLog.create({
       data: {
         restaurantId: input.restaurantId ?? null,
+        branchId: input.branchId ?? null,
         actorId: input.actorId ?? null,
         action: input.action,
         entity: input.entity,
         entityId: input.entityId ?? null,
         description: input.description ?? null,
-        oldValue: (input.oldValue as never) ?? undefined,
-        newValue: (input.newValue as never) ?? undefined,
+        oldValue: (safeAuditValue(input.oldValue) as never) ?? undefined,
+        newValue: (safeAuditValue(input.newValue) as never) ?? undefined,
         ip: headerStore.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
         userAgent: headerStore.get("user-agent")?.slice(0, 500) ?? null,
       },
@@ -54,7 +57,7 @@ export async function logPlatformAudit(input: PlatformAuditInput): Promise<void>
         action: input.action,
         entity: input.entity,
         entityId: input.entityId ?? null,
-        meta: (input.meta as never) ?? undefined,
+        meta: (safeAuditValue(input.meta) as never) ?? undefined,
         ip: headerStore.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
         userAgent: headerStore.get("user-agent")?.slice(0, 500) ?? null,
       },

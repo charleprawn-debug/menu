@@ -23,10 +23,18 @@ const subjects: Record<string, { ar: string; en: string }> = {
 };
 
 export default async function ContactInquiriesPage() {
-  await requirePlatformAdmin();
+  const platform = await requirePlatformAdmin(["support.view", "marketing.view"]);
   const { locale } = await getI18n();
   const ar = locale === "ar";
+  const canViewSupport = platform.platformCapabilities.has("support.view");
+  const canViewMarketing = platform.platformCapabilities.has("marketing.view");
+  const inquiryWhere = canViewSupport && canViewMarketing
+    ? {}
+    : canViewSupport
+      ? { subject: "support" }
+      : { subject: { not: "support" } };
   const inquiries = await db.marketingInquiry.findMany({
+    where: inquiryWhere,
     orderBy: { createdAt: "desc" },
     take: 100,
   });
@@ -36,7 +44,7 @@ export default async function ContactInquiriesPage() {
   return (
     <main className="mx-auto max-w-6xl px-5 py-10">
       <PageHeader
-        title={ar ? "استفسارات الموقع" : "Website inquiries"}
+        title={ar ? (canViewSupport && !canViewMarketing ? "استفسارات الدعم" : "استفسارات الموقع") : (canViewSupport && !canViewMarketing ? "Support inquiries" : "Website inquiries")}
         description={ar ? `رسائل نموذج التواصل — ${newCount} جديدة ضمن آخر ${inquiries.length} رسالة.` : `${newCount} new messages in the latest ${inquiries.length} contact submissions.`}
         actions={<Button asChild variant="outline" size="sm"><Link href="/admin">{ar ? "العودة للمنصة" : "Back to admin"}</Link></Button>}
       />
@@ -63,7 +71,7 @@ export default async function ContactInquiriesPage() {
                   <Mail className="size-3.5" /> {inquiry.email}
                 </a>
               </div>
-              {inquiry.status === "NEW" ? (
+              {inquiry.status === "NEW" && (inquiry.subject === "support" ? platform.platformCapabilities.has("support.manage") : platform.platformCapabilities.has("marketing.manage")) ? (
                 <form action={markInquiryReviewed} className="mt-3">
                   <input type="hidden" name="id" value={inquiry.id} />
                   <Button type="submit" size="sm" variant="ghost">{ar ? "وضع علامة تمت المراجعة" : "Mark as reviewed"}<ArrowRight className="size-3.5 rtl:rotate-180" /></Button>

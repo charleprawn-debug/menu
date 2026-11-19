@@ -335,6 +335,62 @@
     {
       "path": "/en/app/orders/settings",
       "title": "EN orders/settings"
+    },
+    {
+      "path": "/ar/accept-invitation",
+      "title": "Arabic invitation acceptance"
+    },
+    {
+      "path": "/en/accept-invitation",
+      "title": "English invitation acceptance"
+    },
+    {
+      "path": "/ar/confirm-email-change",
+      "title": "Arabic email change confirmation"
+    },
+    {
+      "path": "/en/confirm-email-change",
+      "title": "English email change confirmation"
+    },
+    {
+      "path": "/ar/admin/platform-users",
+      "title": "Arabic platform users and roles"
+    },
+    {
+      "path": "/en/admin/platform-users",
+      "title": "English platform users and roles"
+    },
+    {
+      "path": "/ar/app/staff",
+      "title": "Arabic staff management"
+    },
+    {
+      "path": "/en/app/staff",
+      "title": "English staff management"
+    },
+    {
+      "path": "/ar/app/staff/roles",
+      "title": "Arabic staff roles"
+    },
+    {
+      "path": "/en/app/staff/roles",
+      "title": "English staff roles"
+    },
+    {
+      "path": "/ar/app/staff/permissions",
+      "title": "Arabic staff permission matrix"
+    },
+    {
+      "path": "/en/app/staff/permissions",
+      "title": "English staff permission matrix"
+    },
+    {
+      "path": "/ar/app/staff/activity",
+      "title": "Arabic staff activity log"
+    },
+    {
+      "path": "/en/app/staff/activity",
+      "title": "English staff activity log"
     }
   ]
 }

@@ -3,8 +3,9 @@ import { cache } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
-import { effectivePermissions } from "@/lib/permissions";
+import { effectiveAuthorization, type PermissionScope } from "@/lib/permissions";
 import { getAuth, RESTAURANT_COOKIE, type AuthContext } from "./session";
+import { hasPlatformCapability, platformCapabilities, type PlatformCapability } from "./platform";
 
 export interface ActiveMembership {
   id: string;
@@ -27,9 +28,11 @@ export interface ActiveMembership {
     primaryColor: string;
     secondaryColor: string;
   };
-  branch: { id: string; name: string } | null;
+  branch: { id: string; name: string; isActive: boolean } | null;
+  branchAccessIds: string[];
   roles: { id: string; key: string; name: string; nameEn: string | null }[];
   permissions: Set<string>;
+  permissionScopes: Map<string, PermissionScope>;
 }
 
 /** Resolves the active restaurant for the signed-in user (cookie + membership check). */
@@ -59,7 +62,8 @@ export const getActiveMembership = cache(async (): Promise<ActiveMembership | nu
           secondaryColor: true,
         },
       },
-      branch: { select: { id: true, name: true } },
+      branch: { select: { id: true, name: true, isActive: true } },
+      branchAccess: { select: { branchId: true, branch: { select: { isActive: true } } } },
       roles: {
         include: {
           role: {
@@ -80,13 +84,17 @@ export const getActiveMembership = cache(async (): Promise<ActiveMembership | nu
 
   const membership = memberships.find((m) => m.restaurant.slug === slug) ?? memberships[0];
 
-  const permissions = effectivePermissions({
+  const authorization = effectiveAuthorization({
     roles: membership.roles.map((r) => ({
-      role: { permissions: r.role.permissions.map((p) => ({ permission: { key: p.permission.key } })) },
+      role: { permissions: r.role.permissions.map((p) => ({
+        permission: { key: p.permission.key },
+        scope: p.scope as PermissionScope,
+      })) },
     })),
     permissions: membership.permissions.map((p) => ({
       effect: p.effect as "ALLOW" | "DENY",
       permission: { key: p.permission.key },
+      scope: p.scope as PermissionScope,
     })),
   });
 
@@ -99,13 +107,18 @@ export const getActiveMembership = cache(async (): Promise<ActiveMembership | nu
     branchId: membership.branchId,
     restaurant: membership.restaurant,
     branch: membership.branch,
+    branchAccessIds: [...new Set([
+      ...(membership.branch?.isActive ? [membership.branch.id] : []),
+      ...membership.branchAccess.filter((access) => access.branch.isActive).map((access) => access.branchId),
+    ])],
     roles: membership.roles.map((r) => ({
       id: r.role.id,
       key: r.role.key,
       name: r.role.name,
       nameEn: r.role.nameEn,
     })),
-    permissions,
+    permissions: authorization.permissions,
+    permissionScopes: authorization.scopes,
   };
 });
 
@@ -126,11 +139,25 @@ export async function requireRestaurant(permission?: string): Promise<ActiveMemb
   return { ...membership, auth };
 }
 
-export async function requirePlatformAdmin(): Promise<AuthContext> {
+export async function requirePlatformAdmin(
+  capability?: PlatformCapability | readonly PlatformCapability[],
+): Promise<AuthContext & { platformRole: NonNullable<AuthContext["user"]["platformRole"]>; platformCapabilities: Set<PlatformCapability> }> {
   const auth = await getAuth();
   if (!auth) redirect("/login?next=/admin");
-  if (!auth.user.isPlatformAdmin) redirect("/app/dashboard");
-  return auth;
+  const role = auth.user.platformRole ?? (auth.user.isPlatformAdmin ? "SUPER_ADMIN" : null);
+  if (!role) redirect("/app/dashboard");
+  const capabilities = platformCapabilities(role);
+  if (capability) {
+    const allowed = Array.isArray(capability)
+      ? capability.some((item) => hasPlatformCapability(role, item))
+      : hasPlatformCapability(role, capability as PlatformCapability);
+    if (!allowed) notAuthorizedPlatform();
+  }
+  return { ...auth, platformRole: role, platformCapabilities: capabilities };
+}
+
+function notAuthorizedPlatform(): never {
+  redirect("/admin?access=denied");
 }
 
 /** Non-redirecting permission check for conditional rendering. */

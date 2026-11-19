@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { requireRestaurant } from "@/lib/auth/context";
 import { filterNav, dashboardNav } from "@/lib/navigation";
 import { AppShell } from "@/components/layout/app-shell";
+import { branchRelationWhere, branchScopeWhere, ownedOrderWhere } from "@/lib/auth/scope";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const membership = await requireRestaurant();
@@ -13,12 +14,18 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   const [newOrders, pendingCalls, pendingReservations, unreadCount, notifications, memberships, subscription] =
     await Promise.all([
-      db.order.count({ where: { restaurantId: membership.restaurantId, status: "NEW" } }),
-      db.waiterCall.count({ where: { restaurantId: membership.restaurantId, status: "PENDING" } }),
-      db.reservation.count({ where: { restaurantId: membership.restaurantId, status: "PENDING" } }),
-      db.notification.count({ where: { userId: membership.userId, isRead: false } }),
+      membership.isOwner || membership.permissions.has("orders.view")
+        ? db.order.count({ where: { restaurantId: membership.restaurantId, status: "NEW", ...branchScopeWhere(membership, "orders.view", "branchId"), ...ownedOrderWhere(membership, "orders.view") } })
+        : Promise.resolve(0),
+      membership.isOwner || membership.permissions.has("waiter.use")
+        ? db.waiterCall.count({ where: { restaurantId: membership.restaurantId, status: "PENDING", ...branchRelationWhere(membership, "waiter.use", "table") } })
+        : Promise.resolve(0),
+      membership.isOwner || membership.permissions.has("reservations.view")
+        ? db.reservation.count({ where: { restaurantId: membership.restaurantId, status: "PENDING", ...branchRelationWhere(membership, "reservations.view", "table") } })
+        : Promise.resolve(0),
+      db.notification.count({ where: { userId: membership.userId, isRead: false, OR: [{ restaurantId: membership.restaurantId }, { restaurantId: null }] } }),
       db.notification.findMany({
-        where: { userId: membership.userId },
+        where: { userId: membership.userId, OR: [{ restaurantId: membership.restaurantId }, { restaurantId: null }] },
         orderBy: { createdAt: "desc" },
         take: 5,
         select: { id: true, title: true, body: true, createdAt: true, isRead: true },

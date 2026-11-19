@@ -45,6 +45,12 @@ enum PermissionEffect {
   DENY
 }
 
+enum PermissionScope {
+  RESTAURANT
+  BRANCH
+  OWNED
+}
+
 enum OrderType {
   DINE_IN
   PICKUP
@@ -305,6 +311,7 @@ enum DeliveryStatus {
 model User {
   id              String       @id @default(cuid())
   email           String       @unique
+  pendingEmail    String?      @unique
   passwordHash    String?
   name            String
   phone           String?
@@ -330,6 +337,7 @@ model User {
   aiConversations  AiConversation[]
   auditLogs        PlatformAuditLog[]
   activityLogs     StaffActivityLog[]
+  emailChangeTokens EmailChangeToken[]
   ordersCreated    Order[]            @relation("OrderCreatedBy")
 
   @@map("users")
@@ -373,6 +381,24 @@ model EmailVerificationToken {
 
   @@index([userId])
   @@map("email_verification_tokens")
+}
+
+model EmailChangeToken {
+  id        String    @id @default(cuid())
+  userId    String
+  restaurantId String
+  newEmail  String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([newEmail])
+  @@map("email_change_tokens")
 }
 
 model Organization {
@@ -438,6 +464,8 @@ model Restaurant {
   branches     Branch[]
   members      RestaurantMember[]
   roles        Role[]
+  staffInvitations StaffInvitation[]
+  emailChangeTokens EmailChangeToken[]
   categories   MenuCategory[]
   products     Product[]
   menus        Menu[]
@@ -491,6 +519,10 @@ model Branch {
 
   restaurant Restaurant         @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
   members    RestaurantMember[]
+  memberAccess MemberBranchAccess[]
+  invitations StaffInvitation[]
+  invitationAccess StaffInvitationBranch[]
+  activityLogs StaffActivityLog[]
   tables     Table[]
 
   @@index([restaurantId])
@@ -514,6 +546,7 @@ model RestaurantMember {
   restaurant  Restaurant         @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
   user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
   branch      Branch?            @relation(fields: [branchId], references: [id])
+  branchAccess MemberBranchAccess[]
   roles       MemberRole[]
   permissions MemberPermission[]
 
@@ -537,6 +570,7 @@ model Role {
   restaurant  Restaurant?      @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
   permissions RolePermission[]
   members     MemberRole[]
+  invitations StaffInvitation[]
 
   @@unique([restaurantId, key])
   @@map("roles")
@@ -560,6 +594,7 @@ model Permission {
 model RolePermission {
   roleId       String
   permissionId String
+  scope        PermissionScope @default(RESTAURANT)
 
   role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
   permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
@@ -579,11 +614,25 @@ model MemberRole {
   @@map("member_roles")
 }
 
+model MemberBranchAccess {
+  memberId   String
+  branchId   String
+  assignedAt DateTime @default(now())
+
+  member RestaurantMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  branch Branch           @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@id([memberId, branchId])
+  @@index([branchId])
+  @@map("member_branch_access")
+}
+
 model MemberPermission {
   id           String           @id @default(cuid())
   memberId     String
   permissionId String
   effect       PermissionEffect @default(ALLOW)
+  scope        PermissionScope  @default(RESTAURANT)
 
   member     RestaurantMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
   permission Permission       @relation(fields: [permissionId], references: [id], onDelete: Cascade)
@@ -1171,11 +1220,31 @@ model StaffInvitation {
   invitedById  String?
   expiresAt    DateTime
   acceptedAt   DateTime?
+  lastSentAt   DateTime?
+  sendCount    Int                   @default(0)
   createdAt    DateTime              @default(now())
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  role       Role?      @relation(fields: [roleId], references: [id], onDelete: SetNull)
+  branch     Branch?    @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  branchAccess StaffInvitationBranch[]
 
   @@index([restaurantId])
   @@index([email])
   @@map("staff_invitations")
+}
+
+model StaffInvitationBranch {
+  invitationId String
+  branchId     String
+  assignedAt   DateTime @default(now())
+
+  invitation StaffInvitation @relation(fields: [invitationId], references: [id], onDelete: Cascade)
+  branch     Branch          @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@id([invitationId, branchId])
+  @@index([branchId])
+  @@map("staff_invitation_branches")
 }
 
 model StaffShift {
@@ -1197,6 +1266,7 @@ model StaffShift {
 model StaffActivityLog {
   id           String   @id @default(cuid())
   restaurantId String?
+  branchId     String?
   actorId      String?
   action       String
   entity       String
@@ -1209,8 +1279,10 @@ model StaffActivityLog {
   createdAt    DateTime @default(now())
 
   actor User? @relation(fields: [actorId], references: [id])
+  branch Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
 
   @@index([restaurantId, createdAt])
+  @@index([branchId, createdAt])
   @@map("staff_activity_logs")
 }
 

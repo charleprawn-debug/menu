@@ -2,9 +2,11 @@ import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { requireRestaurant } from "@/lib/auth/context";
 import { db } from "@/lib/db";
+import { Prisma } from "@prisma/client";
 import { getI18n } from "@/i18n";
 import { ensureActiveOrdersKitchenTickets } from "@/lib/services/kitchen-sync";
 import { assertPlanFeature } from "@/lib/services/subscription";
+import { branchScopesWhere, hasRestaurantWideScope, ownedOrderWhere } from "@/lib/auth/scope";
 import { OperationsShell } from "@/components/operations/operations-shell";
 import { KitchenDisplay } from "@/components/operations/kitchen-display";
 
@@ -19,8 +21,14 @@ export default async function KitchenPage() {
     if (error instanceof Error && ["PLAN_FEATURE_REQUIRED", "SUBSCRIPTION_ACCESS_REQUIRED"].includes(error.message)) redirect("/app/subscription");
     throw error;
   }
-  await ensureActiveOrdersKitchenTickets(membership.restaurantId);
-  const canManageStations = membership.isOwner || membership.permissions.has("kitchen.stations.manage");
+  const kitchenPermissions = ["kitchen.view", ...(membership.isOwner || membership.permissions.has("kitchen.manage") ? ["kitchen.manage"] : [])];
+  const ownedPermission = kitchenPermissions.find((permission) => membership.permissionScopes.get(permission) === "OWNED");
+  const orderScope: Prisma.OrderWhereInput = {
+    ...branchScopesWhere(membership, kitchenPermissions, "branchId"),
+    ...(ownedPermission ? ownedOrderWhere(membership, ownedPermission) : {}),
+  };
+  await ensureActiveOrdersKitchenTickets(membership.restaurantId, orderScope);
+  const canManageStations = (membership.isOwner || membership.permissions.has("kitchen.stations.manage")) && hasRestaurantWideScope(membership, "kitchen.stations.manage");
   const canManageTickets = membership.isOwner || membership.permissions.has("kitchen.manage");
   const [stations, tickets, products] = await Promise.all([
     db.kitchenStation.findMany({
@@ -30,7 +38,7 @@ export default async function KitchenPage() {
     }),
     db.kitchenTicket.findMany({
       where: {
-        order: { restaurantId: membership.restaurantId, status: { notIn: ["CANCELLED", "REJECTED", "COMPLETED"] } },
+        order: { restaurantId: membership.restaurantId, ...orderScope, status: { notIn: ["CANCELLED", "REJECTED", "COMPLETED"] } },
         status: { notIn: ["SERVED", "CANCELLED"] },
       },
       orderBy: [{ priority: "desc" }, { createdAt: "asc" }],

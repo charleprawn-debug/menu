@@ -4,22 +4,32 @@ import { revalidatePath } from "next/cache";
 import { Prisma, type PaymentMethod } from "@prisma/client";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { requireRestaurant } from "@/lib/auth/context";
+import { requireRestaurant, type ActiveMembership } from "@/lib/auth/context";
 import { logActivity } from "@/lib/audit";
 import { assertPlanFeature, assertPlanLimit } from "@/lib/services/subscription";
 import { ensureKitchenTickets } from "@/lib/services/kitchen";
+import { branchIdsForPermission, branchScopeWhere, canAccessBranch, hasRestaurantWideScope, ownedOrderWhere } from "@/lib/auth/scope";
 const value=(f:FormData,k:string)=>{const v=f.get(k);return typeof v==="string"?v:""};
 const bool=(f:FormData,k:string)=>["on","true","1"].includes(value(f,k));
 const fail=(x:string):never=>{throw new Error(x)};
 const refresh=()=>{revalidatePath("/app/orders","layout");revalidatePath("/app/orders");revalidatePath("/app/tables","layout");revalidatePath("/kitchen");revalidatePath("/waiter");revalidatePath("/pos")};
 async function tenant(p:string){const m=await requireRestaurant();if(!m.isOwner&&!m.permissions.has(p))fail("FORBIDDEN");await assertPlanFeature(m.restaurantId,"order_management");return m}
+function orderScope(m:ActiveMembership, permission:string):Prisma.OrderWhereInput{return {...branchScopeWhere(m,permission,"branchId"),...ownedOrderWhere(m,permission)} as Prisma.OrderWhereInput}
+async function resolveOrderBranch(m:ActiveMembership,permission:string,tableBranchId:string|null|undefined,requestedBranchId?:string){
+  if(tableBranchId&&requestedBranchId&&tableBranchId!==requestedBranchId)fail("BRANCH_SCOPE_VIOLATION");
+  const allowed=branchIdsForPermission(m,permission);
+  const branchId=tableBranchId??requestedBranchId??(allowed?(m.branchId&&allowed.includes(m.branchId)?m.branchId:allowed[0]):null);
+  if(allowed!==null&&(!branchId||!allowed.includes(branchId)))fail("BRANCH_SCOPE_VIOLATION");
+  if(branchId&&!(await db.branch.findFirst({where:{id:branchId,restaurantId:m.restaurantId,isActive:true},select:{id:true}})))fail("INVALID_BRANCH");
+  return branchId??null;
+}
 const status=z.enum(["NEW","ACCEPTED","PREPARING","READY","DELIVERED","COMPLETED","REJECTED","CANCELLED"]);
 const transitions:Record<string,string[]>={NEW:["ACCEPTED","REJECTED","CANCELLED"],ACCEPTED:["PREPARING","REJECTED","CANCELLED"],PREPARING:["READY","CANCELLED"],READY:["DELIVERED","CANCELLED"],DELIVERED:["COMPLETED"],COMPLETED:[],REJECTED:[],CANCELLED:[]};
 async function change(id:string,next:string,note:string,permission:string){
   const m=await tenant(permission);
   const parsed=status.safeParse(next);
   if(!parsed.success)fail("INVALID_STATUS");
-  const order=await db.order!.findFirst({where:{id,restaurantId:m.restaurantId}});
+  const order=await db.order!.findFirst({where:{id,restaurantId:m.restaurantId,...orderScope(m,permission)}});
   if(!order)fail("NOT_FOUND");
   if(!transitions[order!.status].includes(parsed.data!))fail("INVALID_TRANSITION");
   const now=new Date();
@@ -32,7 +42,7 @@ async function change(id:string,next:string,note:string,permission:string){
   if(parsed.data==="CANCELLED")data.cancelledAt=now;
   if(parsed.data==="REJECTED")data.cancelReason=note||"Rejected by restaurant";
   await db.$transaction(async tx=>{
-    const changed=await tx.order!.updateMany({where:{id,restaurantId:m.restaurantId,status:order!.status},data});
+    const changed=await tx.order!.updateMany({where:{id,restaurantId:m.restaurantId,status:order!.status,...orderScope(m,permission)},data});
     if(changed.count!==1)fail("ORDER_CHANGED");
     await tx.orderStatusHistory.create({data:{orderId:id,fromStatus:order!.status,toStatus:parsed.data!,note:note||null,changedById:m.auth.user.id}});
     if((parsed.data==="CANCELLED"||parsed.data==="REJECTED")&&order!.sessionId){await tx.tableSession.updateMany({where:{id:order!.sessionId,restaurantId:m.restaurantId,status:"OPEN"},data:{total:{decrement:order!.total}}});}
@@ -46,16 +56,16 @@ async function change(id:string,next:string,note:string,permission:string){
       await tx.orderItem.updateMany({where:{orderId:id,order:{restaurantId:m.restaurantId},status:{notIn:["SERVED","CANCELLED"]}},data:{status:"CANCELLED"}});
     }
   },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
-  await logActivity({restaurantId:m.restaurantId,actorId:m.auth.user.id,action:`orders.status.${parsed.data!.toLowerCase()}`,entity:"Order",entityId:id,newValue:{status:parsed.data!,note}});
+  await logActivity({restaurantId:m.restaurantId,branchId:order!.branchId,actorId:m.auth.user.id,action:`orders.status.${parsed.data!.toLowerCase()}`,entity:"Order",entityId:id,oldValue:{status:order!.status},newValue:{status:parsed.data!,note}});
   refresh();
 }
 export async function updateOrderStatusAction(f:FormData){return change(value(f,"id"),value(f,"status"),value(f,"note"),"orders.change_status")}
 export async function acceptOrderAction(f:FormData){return change(value(f,"id"),"ACCEPTED","","orders.accept")}
 export async function rejectOrderAction(f:FormData){return change(value(f,"id"),"REJECTED",value(f,"reason"),"orders.reject")}
 export async function cancelOrderAction(f:FormData){return change(value(f,"id"),"CANCELLED",value(f,"reason"),"orders.cancel")}
-export async function addOrderNoteAction(f:FormData){const m=await tenant("orders.view");const id=value(f,"id"),body=value(f,"body").trim();if(!body)fail("EMPTY_NOTE");if(!(await db.order!.findFirst({where:{id,restaurantId:m.restaurantId}})))fail("NOT_FOUND");await db.orderNote.create({data:{orderId:id,body,isInternal:bool(f,"isInternal"),authorId:m.auth.user.id}});refresh()}
-export async function transferOrderAction(f:FormData){const m=await tenant("orders.change_status");const id=value(f,"id"),tableId=value(f,"tableId");const order=await db.order!.findFirst({where:{id,restaurantId:m.restaurantId}});const table=await db.table!.findFirst({where:{id:tableId,restaurantId:m.restaurantId,isActive:true}});if(!order||!table)fail("NOT_FOUND");const session=await db.tableSession.findFirst({where:{tableId,restaurantId:m.restaurantId,status:"OPEN"}});await db.order!.update({where:{id},data:{tableId:table!.id,sessionId:session?.id??null}});await db.table!.update({where:{id:table!.id},data:{status:"OCCUPIED"}});refresh()}
-export async function duplicateOrderAction(f:FormData){const m=await tenant("orders.create");await assertPlanLimit(m.restaurantId,"ordersPerMonth");const id=value(f,"id");const original=await db.order!.findFirst({where:{id,restaurantId:m.restaurantId},include:{items:{include:{modifiers:true}}}});if(!original)fail("NOT_FOUND");const latest=await db.order!.findFirst({where:{restaurantId:m.restaurantId},orderBy:{orderNumber:"desc"},select:{orderNumber:true}});const copy=await db.$transaction(async tx=>{const order=await tx.order!.create({data:{restaurantId:m.restaurantId,orderNumber:(latest?.orderNumber??0)+1,type:original!.type,status:"NEW",tableId:original!.tableId,sessionId:original!.sessionId,customerName:original!.customerName,customerPhone:original!.customerPhone,subtotal:original!.subtotal,tax:original!.tax,serviceFee:original!.serviceFee,deliveryFee:original!.deliveryFee,total:original!.total,currency:original!.currency,notes:original!.notes,source:"REORDER",createdById:m.auth.user.id,itemsCount:original!.itemsCount}});for(const item of original!.items)await tx.orderItem.create({data:{orderId:order!.id,productId:item.productId,nameSnapshot:item.nameSnapshot,imageSnapshot:item.imageSnapshot,unitPrice:item.unitPrice,quantity:item.quantity,modifiersTotal:item.modifiersTotal,lineTotal:item.lineTotal,taxRate:item.taxRate,notes:item.notes,modifiers:{create:item.modifiers.map(x=>({optionId:x.optionId,groupName:x.groupName,name:x.name,priceDelta:x.priceDelta}))}}});await tx.orderStatusHistory.create({data:{orderId:order!.id,toStatus:"NEW",changedById:m.auth.user.id,note:"Reordered"}});return order});refresh()}
+export async function addOrderNoteAction(f:FormData){const m=await tenant("orders.view");const id=value(f,"id"),body=value(f,"body").trim();if(!body)fail("EMPTY_NOTE");const order=await db.order!.findFirst({where:{id,restaurantId:m.restaurantId,...orderScope(m,"orders.view")},select:{id:true,branchId:true}});if(!order)fail("NOT_FOUND");await db.orderNote.create({data:{orderId:id,body,isInternal:bool(f,"isInternal"),authorId:m.auth.user.id}});refresh()}
+export async function transferOrderAction(f:FormData){const m=await tenant("orders.change_status");const id=value(f,"id"),tableId=value(f,"tableId");const order=await db.order!.findFirst({where:{id,restaurantId:m.restaurantId,...orderScope(m,"orders.change_status")}});const table=await db.table!.findFirst({where:{id:tableId,restaurantId:m.restaurantId,isActive:true,...branchScopeWhere(m,"orders.change_status","branchId") as Prisma.TableWhereInput}});if(!order||!table)fail("NOT_FOUND");if(!canAccessBranch(m,"orders.change_status",table!.branchId))fail("BRANCH_SCOPE_VIOLATION");const session=await db.tableSession.findFirst({where:{tableId,restaurantId:m.restaurantId,status:"OPEN"}});await db.order!.update({where:{id},data:{tableId:table!.id,branchId:table!.branchId,sessionId:session?.id??null}});await db.table!.update({where:{id:table!.id},data:{status:"OCCUPIED"}});await logActivity({restaurantId:m.restaurantId,branchId:table!.branchId,actorId:m.auth.user.id,action:"orders.table.transferred",entity:"Order",entityId:id,oldValue:{branchId:order!.branchId,tableId:order!.tableId,sessionId:order!.sessionId},newValue:{branchId:table!.branchId,tableId:table!.id,sessionId:session?.id??null}});refresh()}
+export async function duplicateOrderAction(f:FormData){const m=await tenant("orders.create");await assertPlanLimit(m.restaurantId,"ordersPerMonth");const id=value(f,"id");const original=await db.order!.findFirst({where:{id,restaurantId:m.restaurantId,...orderScope(m,"orders.create")},include:{items:{include:{modifiers:true}}}});if(!original)fail("NOT_FOUND");const latest=await db.order!.findFirst({where:{restaurantId:m.restaurantId},orderBy:{orderNumber:"desc"},select:{orderNumber:true}});const copy=await db.$transaction(async tx=>{const order=await tx.order!.create({data:{restaurantId:m.restaurantId,branchId:original!.branchId,orderNumber:(latest?.orderNumber??0)+1,type:original!.type,status:"NEW",tableId:original!.tableId,sessionId:original!.sessionId,customerName:original!.customerName,customerPhone:original!.customerPhone,subtotal:original!.subtotal,tax:original!.tax,serviceFee:original!.serviceFee,deliveryFee:original!.deliveryFee,total:original!.total,currency:original!.currency,notes:original!.notes,source:"REORDER",createdById:m.auth.user.id,itemsCount:original!.itemsCount}});for(const item of original!.items)await tx.orderItem.create({data:{orderId:order!.id,productId:item.productId,nameSnapshot:item.nameSnapshot,imageSnapshot:item.imageSnapshot,unitPrice:item.unitPrice,quantity:item.quantity,modifiersTotal:item.modifiersTotal,lineTotal:item.lineTotal,taxRate:item.taxRate,notes:item.notes,modifiers:{create:item.modifiers.map(x=>({optionId:x.optionId,groupName:x.groupName,name:x.name,priceDelta:x.priceDelta}))}}});await tx.orderStatusHistory.create({data:{orderId:order!.id,toStatus:"NEW",changedById:m.auth.user.id,note:"Reordered"}});return order});await logActivity({restaurantId:m.restaurantId,branchId:copy.branchId,actorId:m.auth.user.id,action:"orders.duplicated",entity:"Order",entityId:copy.id,newValue:{sourceOrderId:original!.id,orderNumber:copy.orderNumber}});refresh()}
 export async function createManualOrderAction(f:FormData){
   const m=await tenant("orders.create");
   const parsed=z.object({
@@ -63,6 +73,7 @@ export async function createManualOrderAction(f:FormData){
     draftId:z.string().max(100).optional(),
     customerId:z.string().max(100).optional(),
     tableId:z.string().optional(),
+    branchId:z.string().max(100).optional(),
     customerName:z.string().trim().max(120).optional(),
     customerPhone:z.string().trim().max(40).optional(),
     notes:z.string().trim().max(2000).optional(),
@@ -70,12 +81,12 @@ export async function createManualOrderAction(f:FormData){
     discount:z.string().trim().regex(/^\d{1,9}(?:\.\d{1,2})?$/).default("0"),
     items:z.string().min(2).max(100000),
   }).safeParse({
-    type:value(f,"type"),draftId:value(f,"draftId")||undefined,customerId:value(f,"customerId")||undefined,tableId:value(f,"tableId")||undefined,customerName:value(f,"customerName"),customerPhone:value(f,"customerPhone"),notes:value(f,"notes"),
+    type:value(f,"type"),draftId:value(f,"draftId")||undefined,customerId:value(f,"customerId")||undefined,tableId:value(f,"tableId")||undefined,branchId:value(f,"branchId")||undefined,customerName:value(f,"customerName"),customerPhone:value(f,"customerPhone"),notes:value(f,"notes"),
     paymentMethod:value(f,"paymentMethod")||undefined,discount:value(f,"discount")||"0",items:value(f,"items"),
   });
   if(!parsed.success) fail("INVALID_ORDER");
   const data=parsed.data!;
-  const existingDraft=data.draftId?await db.order!.findFirst({where:{id:data.draftId,restaurantId:m.restaurantId,source:"DRAFT"},include:{invoice:true,payments:true}}):null;
+  const existingDraft=data.draftId?await db.order!.findFirst({where:{id:data.draftId,restaurantId:m.restaurantId,source:"DRAFT",...orderScope(m,"orders.create")},include:{invoice:true,payments:true}}):null;
   if(data.draftId&&!existingDraft) fail("DRAFT_NOT_FOUND");
   if(existingDraft&&(existingDraft!.invoice||existingDraft!.payments.length)) fail("DRAFT_ALREADY_FINALIZED");
   const submittedCoupon=value(f,"couponCode").trim();
@@ -143,10 +154,12 @@ export async function createManualOrderAction(f:FormData){
   if(total.gt("9999999999.99")) fail("ORDER_TOTAL_TOO_LARGE");
   const preserveDraftCustomer=value(f,"preserveDraftCustomer")==="1"&&Boolean(existingDraft);
   const customerId=data.customerId||(preserveDraftCustomer?existingDraft!.customerId??undefined:undefined);
+  if(customerId&&!hasRestaurantWideScope(m,"customers.view"))fail("CUSTOMER_SCOPE_UNSUPPORTED");
   const customer=customerId?await db.customer.findFirst({where:{id:customerId,restaurantId:m.restaurantId},select:{id:true,name:true,phone:true}}):null;
   if(customerId&&!customer) fail("CUSTOMER_NOT_FOUND");
-  const table=data.tableId?await db.table!.findFirst({where:{id:data.tableId,restaurantId:m.restaurantId,isActive:true}}):null;
+  const table=data.tableId?await db.table!.findFirst({where:{id:data.tableId,restaurantId:m.restaurantId,isActive:true,...branchScopeWhere(m,"orders.create","branchId") as Prisma.TableWhereInput}}):null;
   if(data.type==="DINE_IN"&&!table) fail("TABLE_REQUIRED");
+  const branchId=await resolveOrderBranch(m,"orders.create",table?.branchId,data.branchId);
   const session=table?await db.tableSession.findFirst({where:{tableId:table!.id,restaurantId:m.restaurantId,status:"OPEN"}}):null;
   const settings=await db.restaurant.findFirst({where:{id:m.restaurantId},select:{orderSettings:true}});
   const orderSettings=(settings?.orderSettings&&typeof settings.orderSettings==="object"&&!Array.isArray(settings.orderSettings)?settings.orderSettings as Record<string,unknown>:{});
@@ -163,7 +176,7 @@ export async function createManualOrderAction(f:FormData){
       if(openSession) sessionId=openSession.id;
       else { const opened=await tx.tableSession.create({data:{restaurantId:m.restaurantId,tableId:table.id,code:randomBytes(18).toString("base64url"),openedById:m.auth.user.id}}); sessionId=opened.id; }
     }
-    const orderData={type:data.type,status:status as "NEW"|"ACCEPTED"|"PREPARING",tableId:table?.id??null,sessionId,customerId:customer?.id??null,customerName:preserveDraftCustomer?existingDraft!.customerName:data.customerName||customer?.name||null,customerPhone:preserveDraftCustomer?existingDraft!.customerPhone:data.customerPhone||customer?.phone||null,subtotal,discount,tax,total,currency:m.restaurant.currency,notes:data.notes||null,paymentMethod:data.paymentMethod as PaymentMethod|undefined,paymentStatus:"UNPAID" as const,source:submitMode==="draft"?"DRAFT":"MANUAL",couponId,couponCode:couponCode||null,createdById:m.auth.user.id,itemsCount:items.reduce((sum,item)=>sum+item.quantity,0)};
+    const orderData={branchId,type:data.type,status:status as "NEW"|"ACCEPTED"|"PREPARING",tableId:table?.id??null,sessionId,customerId:customer?.id??null,customerName:preserveDraftCustomer?existingDraft!.customerName:data.customerName||customer?.name||null,customerPhone:preserveDraftCustomer?existingDraft!.customerPhone:data.customerPhone||customer?.phone||null,subtotal,discount,tax,total,currency:m.restaurant.currency,notes:data.notes||null,paymentMethod:data.paymentMethod as PaymentMethod|undefined,paymentStatus:"UNPAID" as const,source:submitMode==="draft"?"DRAFT":"MANUAL",couponId,couponCode:couponCode||null,createdById:m.auth.user.id,itemsCount:items.reduce((sum,item)=>sum+item.quantity,0)};
     const saved=existingDraft?await tx.order!.update({where:{id:existingDraft!.id},data:orderData}):await tx.order!.create({data:{restaurantId:m.restaurantId,orderNumber:(latest?.orderNumber??0)+1,...orderData}});
     if(existingDraft) await tx.orderItem.deleteMany({where:{orderId:saved.id}});
     for(const snapshot of snapshots){
@@ -181,10 +194,10 @@ export async function createManualOrderAction(f:FormData){
     if(submitMode!=="draft") await ensureKitchenTickets(tx,m.restaurantId,saved.id);
     return saved;
   },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
-  await logActivity({restaurantId:m.restaurantId,actorId:m.auth.user.id,action:submitMode==="draft"?"orders.draft.saved":"orders.manual.created",entity:"Order",entityId:order.id,newValue:{orderNumber:order.orderNumber,total:total.toFixed(2),currency:m.restaurant.currency}});
+  await logActivity({restaurantId:m.restaurantId,branchId:order.branchId,actorId:m.auth.user.id,action:submitMode==="draft"?"orders.draft.saved":"orders.manual.created",entity:"Order",entityId:order.id,newValue:{orderNumber:order.orderNumber,total:total.toFixed(2),currency:m.restaurant.currency}});
   refresh();
 }
-export async function saveOrderSettingsAction(f:FormData){const m=await tenant("settings.manage");const settings={requireApproval:bool(f,"requireApproval"),autoAccept:bool(f,"autoAccept"),minOrder:Number(value(f,"minOrder"))||0,maxOrder:Number(value(f,"maxOrder"))||999999,acceptWhenClosed:bool(f,"acceptWhenClosed"),defaultPrepMinutes:Number(value(f,"defaultPrepMinutes"))||15,allowCustomerEdit:bool(f,"allowCustomerEdit"),allowCustomerCancel:bool(f,"allowCustomerCancel"),maxConcurrent:Number(value(f,"maxConcurrent"))||50,openTime:value(f,"openTime")||"00:00",closeTime:value(f,"closeTime")||"23:59"};if(settings.minOrder>settings.maxOrder)fail("INVALID_ORDER_LIMITS");await db.restaurant.update({where:{id:m.restaurantId},data:{orderSettings:settings}});refresh()}
+export async function saveOrderSettingsAction(f:FormData){const m=await tenant("settings.manage");if(!hasRestaurantWideScope(m,"settings.manage"))fail("BRANCH_SCOPE_UNSUPPORTED");const settings={requireApproval:bool(f,"requireApproval"),autoAccept:bool(f,"autoAccept"),minOrder:Number(value(f,"minOrder"))||0,maxOrder:Number(value(f,"maxOrder"))||999999,acceptWhenClosed:bool(f,"acceptWhenClosed"),defaultPrepMinutes:Number(value(f,"defaultPrepMinutes"))||15,allowCustomerEdit:bool(f,"allowCustomerEdit"),allowCustomerCancel:bool(f,"allowCustomerCancel"),maxConcurrent:Number(value(f,"maxConcurrent"))||50,openTime:value(f,"openTime")||"00:00",closeTime:value(f,"closeTime")||"23:59"};if(settings.minOrder>settings.maxOrder)fail("INVALID_ORDER_LIMITS");await db.restaurant.update({where:{id:m.restaurantId},data:{orderSettings:settings}});refresh()}
 
 export async function recordOrderPaymentAction(f:FormData){
   const m=await tenant("payments.record");
@@ -194,8 +207,8 @@ export async function recordOrderPaymentAction(f:FormData){
   let amount:Prisma.Decimal;
   try { amount=new Prisma.Decimal(value(f,"amount")); } catch { fail("INVALID_PAYMENT"); }
   if(!amount!.isFinite()||!amount!.gt(0)) fail("INVALID_PAYMENT");
-  await db.$transaction(async(tx)=>{
-    const order=await tx.order!.findFirst({where:{id,restaurantId:m.restaurantId},include:{payments:true,invoice:true}});
+  const auditValues = await db.$transaction(async(tx)=>{
+    const order=await tx.order!.findFirst({where:{id,restaurantId:m.restaurantId,...orderScope(m,"payments.record")},include:{payments:true,invoice:true}});
     if(!order) fail("NOT_FOUND");
     const paid=order!.payments.reduce((sum,p)=>sum.plus(p.amount),new Prisma.Decimal(0));
     const newPaid=paid.plus(amount!);
@@ -203,22 +216,34 @@ export async function recordOrderPaymentAction(f:FormData){
     const next=newPaid.gte(order!.total)?"PAID":"PARTIALLY_PAID";
     await tx.payment.create({data:{restaurantId:m.restaurantId,orderId:id,amount:amount!,currency:order!.currency,method:"CASH",status:"PAID",receivedById:m.auth.user.id}});
     await tx.order!.update({where:{id},data:{paymentStatus:next}});
+    let oldInvoiceStatus = "NONE";
+    let newInvoiceStatus = "NONE";
     if(order!.invoice){
-      await tx.invoice.update({where:{id:order!.invoice.id},data:{paidAmount:newPaid,status:newPaid.gte(order!.invoice.total)?"PAID":"PARTIALLY_PAID"}});
+      oldInvoiceStatus = order!.invoice.status;
+      const invoiceStatus = newPaid.gte(order!.invoice.total)?"PAID" as const:"PARTIALLY_PAID" as const;
+      newInvoiceStatus = invoiceStatus;
+      await tx.invoice.update({where:{id:order!.invoice.id},data:{paidAmount:newPaid,status:invoiceStatus}});
     }
+    return {
+      branchId: order!.branchId,
+      oldValue: { orderPaymentStatus: order!.paymentStatus, paidAmount: paid.toFixed(2), invoiceStatus: oldInvoiceStatus },
+      newValue: { orderPaymentStatus: next, paidAmount: newPaid.toFixed(2), invoiceStatus: newInvoiceStatus, paymentAmount: amount!.toFixed(2), method: "CASH" },
+    };
   },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
+  await logActivity({restaurantId:m.restaurantId,branchId:auditValues.branchId,actorId:m.auth.user.id,action:"payments.recorded",entity:"Order",entityId:id,oldValue:auditValues.oldValue,newValue:auditValues.newValue});
   refresh();
 }
 export async function issueOrderInvoiceAction(f:FormData){
   const m=await tenant("invoices.create");
   const id=value(f,"orderId");
-  const order=await db.order!.findFirst({where:{id,restaurantId:m.restaurantId},include:{items:true,invoice:true,payments:true}});
+  const order=await db.order!.findFirst({where:{id,restaurantId:m.restaurantId,...orderScope(m,"invoices.create")},include:{items:true,invoice:true,payments:true}});
   if(!order) fail("NOT_FOUND");
   if(order!.invoice){refresh();return;}
   const paid=order!.payments.reduce((sum,p)=>sum.plus(p.amount),new Prisma.Decimal(0));
   const status=paid.gte(order!.total)?"PAID":paid.gt(0)?"PARTIALLY_PAID":"ISSUED";
   const invoiceNumber=`INV-${new Date().toISOString().slice(0,10).replaceAll("-","")}-${id.slice(-8)}`;
-  await db.invoice.create({data:{restaurantId:m.restaurantId,orderId:id,invoiceNumber,subtotal:order!.subtotal,discount:order!.discount,tax:order!.tax,serviceFee:order!.serviceFee,total:order!.total,paidAmount:paid,currency:order!.currency,status,items:{create:order!.items.map(i=>({name:i.nameSnapshot,quantity:i.quantity,unitPrice:i.unitPrice,total:i.lineTotal}))}}});
+  const invoice = await db.invoice.create({data:{restaurantId:m.restaurantId,orderId:id,invoiceNumber,subtotal:order!.subtotal,discount:order!.discount,tax:order!.tax,serviceFee:order!.serviceFee,total:order!.total,paidAmount:paid,currency:order!.currency,status,items:{create:order!.items.map(i=>({name:i.nameSnapshot,quantity:i.quantity,unitPrice:i.unitPrice,total:i.lineTotal}))}}});
+  await logActivity({restaurantId:m.restaurantId,branchId:order!.branchId,actorId:m.auth.user.id,action:"invoices.issued",entity:"Invoice",entityId:invoice.id,oldValue:null,newValue:{invoiceNumber:invoice.invoiceNumber,status:invoice.status,total:invoice.total.toString(),paidAmount:invoice.paidAmount.toString(),currency:invoice.currency,orderId:id}});
   refresh();
 }
 export async function applyOrderSettingsGuards(restaurantId:string,subtotal:number,total:number,settings:Record<string,unknown>){const min=Number(settings.minOrder??0),max=Number(settings.maxOrder??Number.MAX_SAFE_INTEGER);if(total<min||total>max)fail("ORDER_OUTSIDE_LIMITS");const current=await db.order!.count({where:{restaurantId,status:{in:["NEW","ACCEPTED","PREPARING","READY"]}}});if(current>=Number(settings.maxConcurrent??Number.MAX_SAFE_INTEGER))fail("ORDER_CAPACITY_REACHED");const now=new Date();const mins=now.getHours()*60+now.getMinutes();const parse=(x:unknown,d:number)=>{const [h,m]=String(x??"").split(":").map(Number);return Number.isFinite(h)&&Number.isFinite(m)?h*60+m:d};const open=parse(settings.openTime,0),close=parse(settings.closeTime,1439);const closed=open<=close?(mins<open||mins>close):(mins<open&&mins>close);if(closed&&!settings.acceptWhenClosed)fail("ORDERS_CLOSED")}

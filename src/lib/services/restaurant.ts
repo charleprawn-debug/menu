@@ -1,4 +1,4 @@
-import type { BillingCycle, Prisma } from "@prisma/client";
+import type { BillingCycle, PermissionScope, Prisma } from "@prisma/client";
 import { db } from "../db";
 import { PERMISSION_KEYS, ROLE_TEMPLATES, permissionsForTemplate } from "../permissions";
 import { randomCode, slugify } from "../utils";
@@ -123,6 +123,11 @@ async function createRestaurantInTransaction(tx: Prisma.TransactionClient, input
 
   for (const template of ROLE_TEMPLATES) {
     const permissionKeys = permissionsForTemplate(template.key);
+    const roleScope: PermissionScope = template.key === "delivery_driver"
+      ? "OWNED"
+      : ["branch_manager", "waiter", "cashier", "chef", "kitchen_manager"].includes(template.key)
+        ? "BRANCH"
+        : "RESTAURANT";
     await tx.role.create({
       data: {
         restaurantId: restaurant.id,
@@ -135,7 +140,7 @@ async function createRestaurantInTransaction(tx: Prisma.TransactionClient, input
         permissions: {
           create: permissionKeys
             .filter((key) => permissionMap.has(key))
-            .map((key) => ({ permissionId: permissionMap.get(key)! })),
+            .map((key) => ({ permissionId: permissionMap.get(key)!, scope: roleScope })),
         },
       },
     });

@@ -3,10 +3,11 @@ import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { ensureKitchenTickets } from "@/lib/services/kitchen";
 
-export async function ensureActiveOrdersKitchenTickets(restaurantId: string) {
+export async function ensureActiveOrdersKitchenTickets(restaurantId: string, orderScope: Prisma.OrderWhereInput = {}) {
   const orders = await db.order.findMany({
     where: {
       restaurantId,
+      ...orderScope,
       source: { not: "DRAFT" },
       status: { in: ["NEW", "ACCEPTED", "PREPARING"] },
       kitchenTickets: { none: {} },

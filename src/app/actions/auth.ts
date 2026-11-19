@@ -76,7 +76,7 @@ export async function loginAction(_prev: ActionState, formData: FormData): Promi
     take: 1,
   });
 
-  if (user.isPlatformAdmin) redirect("/admin");
+  if (user.platformRole || user.isPlatformAdmin) redirect("/admin");
   if (memberships.length === 0) redirect("/onboarding");
 
   await setRestaurantCookie(memberships[0].restaurant.slug);

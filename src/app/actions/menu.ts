@@ -7,6 +7,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import type { PermissionKey } from "@/lib/permissions";
 import { requireRestaurant } from "@/lib/auth/context";
+import { hasRestaurantWideScope } from "@/lib/auth/scope";
 import { logActivity } from "@/lib/audit";
 import { assertPlanFeature, assertPlanLimit } from "@/lib/services/subscription";
 import { parseCsvRecords } from "@/lib/csv";
@@ -37,6 +38,7 @@ function fail(message: string): never { throw new Error(message); }
 async function tenant(permission: PermissionKey) {
   const membership = await requireRestaurant();
   if (!membership.isOwner && !membership.permissions.has(permission)) fail("FORBIDDEN");
+  if (!hasRestaurantWideScope(membership, permission)) fail("BRANCH_SCOPE_UNSUPPORTED");
   await assertPlanFeature(membership.restaurantId, "digital_menu");
   return membership;
 }
@@ -151,11 +153,13 @@ export async function saveProductAction(form: FormData) {
     if (!category) fail("INVALID_CATEGORY");
   }
   const data = { categoryId: parsed.data.categoryId || null, nameAr: parsed.data.nameAr, nameEn: parsed.data.nameEn || null, descriptionAr: parsed.data.descriptionAr || null, descriptionEn: parsed.data.descriptionEn || null, sku: parsed.data.sku || null, price: new Prisma.Decimal(parsed.data.price), compareAtPrice: parsed.data.compareAtPrice ? new Prisma.Decimal(parsed.data.compareAtPrice) : null, costPrice: parsed.data.costPrice ? new Prisma.Decimal(parsed.data.costPrice) : null, taxRate: new Prisma.Decimal(parsed.data.taxRate), imageUrl: parsed.data.imageUrl || null, calories: parsed.data.calories || null, prepMinutes: parsed.data.prepMinutes, ingredients: parsed.data.ingredients || null, allergens: parsed.data.allergens, tags: parsed.data.tags, availability: parsed.data.availability, stockQty: parsed.data.stockQty ?? null, trackStock: parsed.data.trackStock, isVisible: parsed.data.isVisible, isFeatured: parsed.data.isFeatured, sortOrder: parsed.data.sortOrder };
-  await db.$transaction(async (tx) => {
+  let previousProduct: unknown = null;
+  const savedProduct = await db.$transaction(async (tx) => {
     let product;
     if (id) {
       product = await tx.product.findFirst({ where: { id, restaurantId: membership.restaurantId, deletedAt: null } });
       if (!product) fail("NOT_FOUND");
+      previousProduct = product;
       if (!product.price.equals(data.price) && !membership.isOwner && !membership.permissions.has("menu.prices.update")) fail("FORBIDDEN");
       if (!product.price.equals(data.price)) await tx.priceHistory.create({ data: { productId: id, oldPrice: product.price, newPrice: data.price, changedById: membership.auth.user.id, reason: value(form, "priceReason") || "Menu product price update" } });
       await tx.product.update({ where: { id }, data });
@@ -175,7 +179,7 @@ export async function saveProductAction(form: FormData) {
     }
     return product;
   });
-  await logActivity({ restaurantId: membership.restaurantId, actorId: membership.auth.user.id, action: id ? "menu.product.updated" : "menu.product.created", entity: "Product", entityId: id, newValue: data });
+  await logActivity({ restaurantId: membership.restaurantId, actorId: membership.auth.user.id, action: id ? "menu.product.updated" : "menu.product.created", entity: "Product", entityId: savedProduct.id, oldValue: previousProduct, newValue: data });
   refresh();
 }
 
