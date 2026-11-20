@@ -3,6 +3,7 @@ export interface NavItem {
   href: string;
   icon: string;
   permission?: string;
+  allPermissions?: string[];
   badge?: "orders" | "calls" | "reservations" | "tickets";
   soon?: boolean;
   exact?: boolean;
@@ -87,8 +88,7 @@ export const dashboardNav: NavGroup[] = [
       { labelKey: "nav.reportsSales", href: "/app/reports/sales", icon: "TrendingUp", permission: "reports.financial.view" },
       { labelKey: "nav.reportsOrders", href: "/app/reports/orders", icon: "BarChart3", permission: "reports.view" },
       { labelKey: "nav.reportsProducts", href: "/app/reports/products", icon: "PieChart", permission: "reports.view" },
-      { labelKey: "nav.reportsStaff", href: "/app/reports/staff", icon: "UserCheck", permission: "reports.view" },
-      { labelKey: "nav.reportsPerformance", href: "/app/reports/performance", icon: "Activity", permission: "reports.view" },
+      { labelKey: "nav.reportsStaff", href: "/app/reports/staff", icon: "UserCheck", permission: "reports.view", allPermissions: ["staff.view"] },
       { labelKey: "nav.reportsCenter", href: "/app/reports", icon: "FileBarChart", permission: "reports.view", exact: true },
     ],
   },
@@ -237,7 +237,10 @@ export function filterNav(groups: NavGroup[], permissions: Set<string>, isOwner:
   return groups
     .map((group) => ({
       ...group,
-      items: group.items.filter((item) => !item.permission || isOwner || permissions.has(item.permission)),
+      items: group.items.filter((item) =>
+        (!item.permission || isOwner || permissions.has(item.permission)) &&
+        (!item.allPermissions || isOwner || item.allPermissions.every((permission) => permissions.has(permission))),
+      ),
     }))
     .filter((group) => group.items.length > 0);
 }

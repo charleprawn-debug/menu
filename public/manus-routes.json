@@ -417,6 +417,38 @@
       "title": "English restaurant invoice details"
     },
     {
+      "path": "/ar/app/reports",
+      "title": "Arabic reports center"
+    },
+    {
+      "path": "/en/app/reports",
+      "title": "English reports center"
+    },
+    {
+      "path": "/ar/app/reports/products",
+      "title": "Arabic product report"
+    },
+    {
+      "path": "/en/app/reports/products",
+      "title": "English product report"
+    },
+    {
+      "path": "/ar/app/reports/orders",
+      "title": "Arabic order report"
+    },
+    {
+      "path": "/en/app/reports/orders",
+      "title": "English order report"
+    },
+    {
+      "path": "/ar/app/reports/staff",
+      "title": "Arabic staff report"
+    },
+    {
+      "path": "/en/app/reports/staff",
+      "title": "English staff report"
+    },
+    {
       "path": "/ar/app/reports/sales",
       "title": "Arabic sales report"
     },
