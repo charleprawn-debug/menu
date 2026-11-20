@@ -12,7 +12,7 @@ import { branchIdsForPermission, branchScopeWhere, canAccessBranch, hasRestauran
 const value=(f:FormData,k:string)=>{const v=f.get(k);return typeof v==="string"?v:""};
 const bool=(f:FormData,k:string)=>["on","true","1"].includes(value(f,k));
 const fail=(x:string):never=>{throw new Error(x)};
-const refresh=()=>{revalidatePath("/app/orders","layout");revalidatePath("/app/orders");revalidatePath("/app/tables","layout");revalidatePath("/kitchen");revalidatePath("/waiter");revalidatePath("/pos")};
+const refresh=()=>{revalidatePath("/app/orders","layout");revalidatePath("/app/orders");revalidatePath("/app/sales","layout");revalidatePath("/app/reports/sales");revalidatePath("/app/dashboard");revalidatePath("/app/tables","layout");revalidatePath("/kitchen");revalidatePath("/waiter");revalidatePath("/pos")};
 async function tenant(p:string){const m=await requireRestaurant();if(!m.isOwner&&!m.permissions.has(p))fail("FORBIDDEN");await assertPlanFeature(m.restaurantId,"order_management");return m}
 function orderScope(m:ActiveMembership, permission:string):Prisma.OrderWhereInput{return {...branchScopeWhere(m,permission,"branchId"),...ownedOrderWhere(m,permission)} as Prisma.OrderWhereInput}
 async function resolveOrderBranch(m:ActiveMembership,permission:string,tableBranchId:string|null|undefined,requestedBranchId?:string){
@@ -206,15 +206,18 @@ export async function recordOrderPaymentAction(f:FormData){
   if(method!=="CASH") fail("PAYMENT_PROVIDER_REQUIRED");
   let amount:Prisma.Decimal;
   try { amount=new Prisma.Decimal(value(f,"amount")); } catch { fail("INVALID_PAYMENT"); }
-  if(!amount!.isFinite()||!amount!.gt(0)) fail("INVALID_PAYMENT");
+  if(!amount!.isFinite()||!amount!.gt(0)||amount!.decimalPlaces()>2) fail("INVALID_PAYMENT");
   const auditValues = await db.$transaction(async(tx)=>{
     const order=await tx.order!.findFirst({where:{id,restaurantId:m.restaurantId,...orderScope(m,"payments.record")},include:{payments:true,invoice:true}});
     if(!order) fail("NOT_FOUND");
-    const paid=order!.payments.reduce((sum,p)=>sum.plus(p.amount),new Prisma.Decimal(0));
+    const refunds=await tx.refund.findMany({where:{orderId:id,restaurantId:m.restaurantId,status:"PROCESSED"},select:{amount:true}});
+    const grossPaid=order!.payments.filter(p=>p.status==="PAID"||p.status==="REFUNDED").reduce((sum,p)=>sum.plus(p.amount),new Prisma.Decimal(0));
+    const refunded=refunds.reduce((sum,r)=>sum.plus(r.amount),new Prisma.Decimal(0));
+    const paid=grossPaid.minus(refunded).gt(0)?grossPaid.minus(refunded):new Prisma.Decimal(0);
     const newPaid=paid.plus(amount!);
     if(newPaid.gt(order!.total)) fail("PAYMENT_EXCEEDS_TOTAL");
     const next=newPaid.gte(order!.total)?"PAID":"PARTIALLY_PAID";
-    await tx.payment.create({data:{restaurantId:m.restaurantId,orderId:id,amount:amount!,currency:order!.currency,method:"CASH",status:"PAID",receivedById:m.auth.user.id}});
+    await tx.payment.create({data:{restaurantId:m.restaurantId,orderId:id,invoiceId:order!.invoice?.id??null,amount:amount!,currency:order!.currency,method:"CASH",status:"PAID",receivedById:m.auth.user.id}});
     await tx.order!.update({where:{id},data:{paymentStatus:next}});
     let oldInvoiceStatus = "NONE";
     let newInvoiceStatus = "NONE";
@@ -236,14 +239,21 @@ export async function recordOrderPaymentAction(f:FormData){
 export async function issueOrderInvoiceAction(f:FormData){
   const m=await tenant("invoices.create");
   const id=value(f,"orderId");
-  const order=await db.order!.findFirst({where:{id,restaurantId:m.restaurantId,...orderScope(m,"invoices.create")},include:{items:true,invoice:true,payments:true}});
-  if(!order) fail("NOT_FOUND");
-  if(order!.invoice){refresh();return;}
-  const paid=order!.payments.reduce((sum,p)=>sum.plus(p.amount),new Prisma.Decimal(0));
-  const status=paid.gte(order!.total)?"PAID":paid.gt(0)?"PARTIALLY_PAID":"ISSUED";
-  const invoiceNumber=`INV-${new Date().toISOString().slice(0,10).replaceAll("-","")}-${id.slice(-8)}`;
-  const invoice = await db.invoice.create({data:{restaurantId:m.restaurantId,orderId:id,invoiceNumber,subtotal:order!.subtotal,discount:order!.discount,tax:order!.tax,serviceFee:order!.serviceFee,total:order!.total,paidAmount:paid,currency:order!.currency,status,items:{create:order!.items.map(i=>({name:i.nameSnapshot,quantity:i.quantity,unitPrice:i.unitPrice,total:i.lineTotal}))}}});
-  await logActivity({restaurantId:m.restaurantId,branchId:order!.branchId,actorId:m.auth.user.id,action:"invoices.issued",entity:"Invoice",entityId:invoice.id,oldValue:null,newValue:{invoiceNumber:invoice.invoiceNumber,status:invoice.status,total:invoice.total.toString(),paidAmount:invoice.paidAmount.toString(),currency:invoice.currency,orderId:id}});
+  const result=await db.$transaction(async(tx)=>{
+    const order=await tx.order!.findFirst({where:{id,restaurantId:m.restaurantId,...orderScope(m,"invoices.create")},include:{items:true,invoice:true,payments:true}});
+    if(!order) fail("NOT_FOUND");
+    if(order!.invoice) return {invoice:order!.invoice,order,created:false};
+    const refunds=await tx.refund.findMany({where:{orderId:id,restaurantId:m.restaurantId,status:"PROCESSED"},select:{amount:true}});
+    const grossPaid=order!.payments.filter(p=>p.status==="PAID"||p.status==="REFUNDED").reduce((sum,p)=>sum.plus(p.amount),new Prisma.Decimal(0));
+    const refunded=refunds.reduce((sum,r)=>sum.plus(r.amount),new Prisma.Decimal(0));
+    const paid=grossPaid.minus(refunded).gt(0)?grossPaid.minus(refunded):new Prisma.Decimal(0);
+    const status=paid.gte(order!.total)?"PAID":paid.gt(0)?"PARTIALLY_PAID":refunded.gt(0)?"REFUNDED":"ISSUED";
+    const invoiceNumber=`INV-${new Date().toISOString().slice(0,10).replaceAll("-","")}-${order!.orderNumber}`;
+    const invoice=await tx.invoice.create({data:{restaurantId:m.restaurantId,orderId:id,invoiceNumber,subtotal:order!.subtotal,discount:order!.discount,tax:order!.tax,serviceFee:order!.serviceFee,total:order!.total,paidAmount:paid,currency:order!.currency,status,items:{create:order!.items.map(i=>({name:i.nameSnapshot,quantity:i.quantity,unitPrice:i.unitPrice,total:i.lineTotal}))}}});
+    return {invoice,order,created:true};
+  },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
+  if(!result.created){refresh();return;}
+  await logActivity({restaurantId:m.restaurantId,branchId:result.order!.branchId,actorId:m.auth.user.id,action:"invoices.issued",entity:"Invoice",entityId:result.invoice.id,oldValue:null,newValue:{invoiceNumber:result.invoice.invoiceNumber,status:result.invoice.status,total:result.invoice.total.toString(),paidAmount:result.invoice.paidAmount.toString(),currency:result.invoice.currency,orderId:id}});
   refresh();
 }
 export async function applyOrderSettingsGuards(restaurantId:string,subtotal:number,total:number,settings:Record<string,unknown>){const min=Number(settings.minOrder??0),max=Number(settings.maxOrder??Number.MAX_SAFE_INTEGER);if(total<min||total>max)fail("ORDER_OUTSIDE_LIMITS");const current=await db.order!.count({where:{restaurantId,status:{in:["NEW","ACCEPTED","PREPARING","READY"]}}});if(current>=Number(settings.maxConcurrent??Number.MAX_SAFE_INTEGER))fail("ORDER_CAPACITY_REACHED");const now=new Date();const mins=now.getHours()*60+now.getMinutes();const parse=(x:unknown,d:number)=>{const [h,m]=String(x??"").split(":").map(Number);return Number.isFinite(h)&&Number.isFinite(m)?h*60+m:d};const open=parse(settings.openTime,0),close=parse(settings.closeTime,1439);const closed=open<=close?(mins<open||mins>close):(mins<open&&mins>close);if(closed&&!settings.acceptWhenClosed)fail("ORDERS_CLOSED")}

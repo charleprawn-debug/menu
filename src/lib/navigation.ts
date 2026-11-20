@@ -84,7 +84,7 @@ export const dashboardNav: NavGroup[] = [
     key: "reports",
     labelKey: "nav.reports",
     items: [
-      { labelKey: "nav.reportsSales", href: "/app/reports/sales", icon: "TrendingUp", permission: "reports.view" },
+      { labelKey: "nav.reportsSales", href: "/app/reports/sales", icon: "TrendingUp", permission: "reports.financial.view" },
       { labelKey: "nav.reportsOrders", href: "/app/reports/orders", icon: "BarChart3", permission: "reports.view" },
       { labelKey: "nav.reportsProducts", href: "/app/reports/products", icon: "PieChart", permission: "reports.view" },
       { labelKey: "nav.reportsStaff", href: "/app/reports/staff", icon: "UserCheck", permission: "reports.view" },

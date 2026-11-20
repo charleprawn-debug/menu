@@ -1403,8 +1403,12 @@ model Expense {
   attachmentUrl String?
   createdById   String?
   createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  deletedAt     DateTime?
 
+  @@index([restaurantId, deletedAt, spentAt])
   @@index([restaurantId, spentAt])
+  @@index([branchId, spentAt])
   @@map("expenses")
 }
 

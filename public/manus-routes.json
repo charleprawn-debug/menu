@@ -391,6 +391,38 @@
     {
       "path": "/en/app/staff/activity",
       "title": "English staff activity log"
+    },
+    {
+      "path": "/ar/app/sales",
+      "title": "Arabic restaurant sales"
+    },
+    {
+      "path": "/en/app/sales",
+      "title": "English restaurant sales"
+    },
+    {
+      "path": "/ar/app/sales/:tab",
+      "title": "Arabic restaurant billing section"
+    },
+    {
+      "path": "/en/app/sales/:tab",
+      "title": "English restaurant billing section"
+    },
+    {
+      "path": "/ar/app/sales/invoices/:id",
+      "title": "Arabic restaurant invoice details"
+    },
+    {
+      "path": "/en/app/sales/invoices/:id",
+      "title": "English restaurant invoice details"
+    },
+    {
+      "path": "/ar/app/reports/sales",
+      "title": "Arabic sales report"
+    },
+    {
+      "path": "/en/app/reports/sales",
+      "title": "English sales report"
     }
   ]
 }
